@@ -976,11 +976,8 @@ function makeLengthKey(args: any[]): string {
   return units
 }
 
-export const turfc = new Proxy(rawTurf as any, {
-  get(target: any, prop: string | symbol) {
-    const val = target[prop]
-    if (typeof val === 'function') {
-      return (...args: any[]) => {
+function createTurfWrapper(prop: string, val: any, target: any) {
+  return (...args: any[]) => {
         if (!VERBOSE_GIS_DIAGNOSTICS) {
           if (activePipCache && prop === 'point' && args.length >= 1 && Array.isArray(args[0])) {
             return activePipCache.getPoint(args[0], args[1])
@@ -1162,11 +1159,24 @@ export const turfc = new Proxy(rawTurf as any, {
         }
 
         return r
-      }
-    }
-    return val
   }
-})
+}
+
+export const turfc: any = {}
+
+for (const prop of Object.getOwnPropertyNames(rawTurf as any)) {
+  const val = (rawTurf as any)[prop]
+  const target = rawTurf
+  if (typeof val === 'function') {
+    turfc[prop] = createTurfWrapper(prop, val, target)
+  } else {
+    turfc[prop] = val
+  }
+}
+
+for (const sym of Object.getOwnPropertySymbols(rawTurf as any)) {
+  turfc[sym] = (rawTurf as any)[sym]
+}
 
 export function safeTurfOp<T>(op: () => T, fallback: T, opName?: string): T {
   try {
