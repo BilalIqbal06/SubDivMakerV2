@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+package-lock.json?./pnpm-lock.yaml
+
+# Build output
+dist/
+
+# Vercel
+.vercel/
+
+# Local environment
+.env
+.env.*
+*.local
+
+# Cache
+.cache/
+*.eslintcache
+
+# Generated / debug / test artifacts
+diagnostic/
+test-hydro*.mjs
+metadata*.json
+parcel.json

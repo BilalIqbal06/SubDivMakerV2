@@ -1,0 +1,115 @@
+@import 'leaflet/dist/leaflet.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom map cursors */
+.leaflet-container {
+  cursor: url('/cursors/map-cursor.svg') 4 4, crosshair !important;
+  background: #26342f;
+}
+
+.leaflet-grab {
+  cursor: url('/cursors/map-cursor.svg') 4 4, crosshair !important;
+}
+
+.leaflet-dragging {
+  cursor: url('/cursors/drag-cursor.svg') 12 12, grabbing !important;
+}
+
+.leaflet-interactive {
+  cursor: url('/cursors/parcel-cursor.svg') 8 4, pointer !important;
+}
+
+.parcel-polygon {
+  cursor: url('/cursors/parcel-cursor.svg') 8 4, pointer !important;
+}
+
+.selected-parcel-path {
+  cursor: url('/cursors/parcel-cursor.svg') 8 4, pointer !important;
+}
+
+/* Remove default focus ring from Leaflet interactive paths */
+.leaflet-container .leaflet-interactive:focus {
+  outline: none;
+}
+
+/* Add custom focus-visible style for keyboard accessibility */
+.leaflet-container .leaflet-interactive:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 4px rgba(94, 253, 134, 0.85));
+}
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Color System */
+  --brand-black: #050706;
+  --charcoal: #1a1d21;
+  --card-charcoal: #202429;
+  --deep-viridian: #123D35;
+  --viridian: #40826D;
+  --seafoam: #93E9BE;
+  --soft-seafoam: #C9F4E2;
+  --plum: #4c1d95;
+  --plum-soft: #6b21a8;
+  --magenta: #be185d;
+  --magenta-soft: #db2777;
+
+  /* Gradients */
+  --brand-gradient: linear-gradient(110deg, #050706 0%, #123D35 42%, #40826D 74%, #93E9BE 100%);
+  --sidebar-gradient: linear-gradient(180deg, #0d0f12 0%, #1a1d21 60%, #202429 100%);
+  --button-gradient: linear-gradient(90deg, #40826D, #93E9BE);
+  --search-gradient: linear-gradient(90deg, rgba(5, 7, 6, 0.97), rgba(18, 61, 53, 0.96));
+  --card-bg: #1e2127;
+  --card-bg-soft: rgba(32, 36, 41, 0.95);
+  --card-border: rgba(147, 233, 190, 0.22);
+  --accent-plum-magenta: linear-gradient(90deg, #4c1d95, #be185d);
+
+  /* Text Colors */
+  --text-primary: #ffffff;
+  --text-secondary: #C9F4E2;
+  --text-muted: rgba(201, 244, 226, 0.72);
+}
+
+/* Selected parcel glow */
+.selected-parcel-path {
+  filter: drop-shadow(0 0 2px rgba(248, 6, 204, 0.45));
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* Ensure Leaflet tiles render sharply without filters or blur */
+.leaflet-tile {
+  image-rendering: auto;
+  filter: none;
+  opacity: 1;
+  transform: none;
+}
+
+.leaflet-tile-pane {
+  filter: none;
+  opacity: 1;
+}

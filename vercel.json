@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/loudoun/:path*",
+      "destination": "https://logis.loudoun.gov/:path*"
+    },
+    {
+      "source": "/api/loudoun-gis/:path*",
+      "destination": "https://gis.loudoun.gov/:path*"
+    }
+  ]
+}
