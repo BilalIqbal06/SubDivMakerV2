@@ -39,6 +39,7 @@ interface SelectedParcel {
 
 function App() {
   const [currentStep, setCurrentStep] = useState<AppStep>('explore')
+  const [showGenerateExport, setShowGenerateExport] = useState(false)
   const [selectedParcel, setSelectedParcel] = useState<SelectedParcel | null>(null)
   const [mapZoom, setMapZoom] = useState(10)
   const [sidebarWidth, setSidebarWidth] = useState(320)
@@ -2094,6 +2095,7 @@ function App() {
               suppressAnalysisUntilManualRun={suppressAnalysisUntilManualRun}
               onAnalysisButtonStatusChange={handleAnalysisButtonStatusChange}
               onGenerateRoadSkeleton={handleGenerateRoadSkeleton}
+              onGenerateExportVisibilityChange={setShowGenerateExport}
               conceptualRoadResult={conceptualRoadResult}
               secondaryRoadNetworkResult={secondaryRoadNetworkResult}
               developmentOpportunityBlockResult={developmentOpportunityBlockResult}
@@ -2161,14 +2163,14 @@ function App() {
               selectedParcelMCPI={selectedParcel?.feature.properties?.PA_MCPI || ''}
               isAnalysisRunning={isAnalysisRunning}
               analysisBundleIsCurrent={analysisBundleIsCurrent}
-              conceptualRoadResult={conceptualRoadResult}
-              secondaryRoadNetworkResult={secondaryRoadNetworkResult}
-              developmentOpportunityBlockResult={developmentOpportunityBlockResult}
+              conceptualRoadResult={showGenerateExport ? conceptualRoadResult : null}
+              secondaryRoadNetworkResult={showGenerateExport ? secondaryRoadNetworkResult : null}
+              developmentOpportunityBlockResult={showGenerateExport ? developmentOpportunityBlockResult : null}
               terrainData={terrainData}
               terrainSuitability={terrainSuitability}
-              conceptualProgram={conceptualProgram}
-              conceptualLayout={conceptualLayout}
-              localStreetNetworkResult={localStreetNetworkResult}
+              conceptualProgram={showGenerateExport ? conceptualProgram : null}
+              conceptualLayout={showGenerateExport ? conceptualLayout : null}
+              localStreetNetworkResult={showGenerateExport ? localStreetNetworkResult : null}
             />
           </MapErrorBoundary>
 

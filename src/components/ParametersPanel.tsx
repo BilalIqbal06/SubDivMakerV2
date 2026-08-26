@@ -279,6 +279,7 @@ interface ParametersPanelProps {
   generatingAlternativeId?: ConceptStrategy | null
   isAlternativeGenerating?: boolean
   onSelectAlternative?: (id: ConceptStrategy) => void
+  onGenerateExportVisibilityChange?: (visible: boolean) => void
 }
 
 function ParametersPanel({ 
@@ -318,7 +319,8 @@ function ParametersPanel({
   authoritativeAlternativeId,
   generatingAlternativeId,
   isAlternativeGenerating,
-  onSelectAlternative
+  onSelectAlternative,
+  onGenerateExportVisibilityChange
 }: ParametersPanelProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>(['dev-type', 'intensity', 'site-prefs'])
   const [parameters, setParameters] = useState<ProjectParameters | null>(null)
@@ -328,6 +330,7 @@ function ParametersPanel({
   const [toast, setToast] = useState<{ message: string; mcpi?: string } | null>(null)
   const [analysisButtonStatus, setAnalysisButtonStatus] = useState<'idle' | 'running' | 'complete' | 'dirty' | 'error'>('idle')
   const [showGenerateExport, setShowGenerateExport] = useState(false)
+  const [isEditMode, setIsEditMode] = useState(false)
   const [userSimplifiedOverrides, setUserSimplifiedOverrides] = useState<Record<string, boolean>>({})
   const [recommendedSimplified, setRecommendedSimplified] = useState<SimplifiedParameters | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -371,6 +374,19 @@ function ParametersPanel({
       setShowGenerateExport(false)
     }
   }, [analysisButtonStatus, candidateOpenArea, parcelId, showGenerateExport])
+
+  // Notify the parent when the Generate & Export panel opens/closes so the map
+  // can show generated concept layers only when that workflow page is active.
+  useEffect(() => {
+    if (onGenerateExportVisibilityChange) {
+      onGenerateExportVisibilityChange(showGenerateExport)
+    }
+  }, [showGenerateExport, onGenerateExportVisibilityChange])
+
+  // Exit edit mode when a new/updated analysis result is submitted.
+  useEffect(() => {
+    setIsEditMode(false)
+  }, [submittedParameters?.mcpi, submittedParameters?.analysisRunId])
 
   // Initialize the editor to canonical defaults when a fresh parcel is selected.
   // Draft parameters are ONLY applied through the explicit draft-restoration effect below.
@@ -1153,16 +1169,17 @@ function ParametersPanel({
         )}
       </div>
 
-      {/* Applied Parameters (shows after analysis) */}
-      {submittedParameters && (
+      {/* Applied Parameters (shows after analysis, hidden while editing) */}
+      {submittedParameters && !isEditMode && (
         <AppliedParametersSection
           submittedParameters={submittedParameters}
           candidateOpenArea={candidateOpenArea}
           parcelFeasibilityAssessment={parcelFeasibilityAssessment}
+          onEdit={() => setIsEditMode(true)}
         />
       )}
 
-      {!submittedParameters && (
+      {(!submittedParameters || isEditMode) && (
       <div className="flex-1 overflow-y-auto p-4 space-y-3" style={{ scrollbarWidth: 'thin', scrollbarColor: '#40826D #0B211B' }}>
         {/* Section 1: Selected Parcel (Read-only) */}
         <CollapsibleSection
@@ -2215,11 +2232,13 @@ function GenerationGoalSection({ value, onChange }: { value: GenerationPrioritie
 function AppliedParametersSection({
   submittedParameters,
   candidateOpenArea,
-  parcelFeasibilityAssessment
+  parcelFeasibilityAssessment,
+  onEdit
 }: {
   submittedParameters: SubmittedParameters | null
   candidateOpenArea: CandidateOpenAreaResult | null
   parcelFeasibilityAssessment: ParcelFeasibilityAssessment | null
+  onEdit?: () => void
 }) {
   if (!submittedParameters) return null
 
@@ -2314,6 +2333,17 @@ function AppliedParametersSection({
           <div className="flex justify-between"><span className="text-slate-400">Components</span><span className="text-white">{candidateOpenArea?.componentCount ?? '—'}</span></div>
         </div>
       </CollapsibleSection>
+
+      {onEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="w-full mt-3 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[13px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-[#93E9BE]"
+          style={{ background: 'transparent', border: '1px solid rgba(64, 130, 109, 0.45)', color: 'var(--soft-seafoam)' }}
+        >
+          Edit Parameters
+        </button>
+      )}
     </div>
   )
 }
