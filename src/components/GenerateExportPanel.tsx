@@ -314,13 +314,45 @@ function terrainStatus(profile: ConceptualRoadSkeletonResult['terrainProfile']):
   return 'REVIEW'
 }
 
+const GEOJSON_GEOMETRY_TYPES = ['Point', 'LineString', 'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection']
+
 function toFeatures(input: any): Array<GeoJSON.Feature<GeoJSON.Geometry>> {
   if (!input) return []
-  if (input.type === 'FeatureCollection') {
-    return (input.features || []).filter((f: any) => f && f.geometry)
+
+  // GeoJSON FeatureCollection
+  if (input.type === 'FeatureCollection' || (input.features && Array.isArray(input.features))) {
+    return (input.features || [])
+      .filter((f: any) => f && (f.geometry || GEOJSON_GEOMETRY_TYPES.includes(f.type)))
+      .map((f: any) => {
+        if (f.type === 'Feature') return f
+        if (GEOJSON_GEOMETRY_TYPES.includes(f.type)) return { type: 'Feature', geometry: f, properties: {} }
+        if (f.geometry) return { type: 'Feature', geometry: f.geometry, properties: f.properties || {} }
+        return null
+      })
+      .filter(Boolean) as any
   }
+
+  // GeoJSON Feature
   if (input.type === 'Feature' && input.geometry) return [input]
-  if (input.geometry) return [input]
+
+  // Raw GeoJSON Geometry (Polygon, MultiPolygon, etc.)
+  if (GEOJSON_GEOMETRY_TYPES.includes(input.type)) {
+    return [{ type: 'Feature', geometry: input, properties: {} }]
+  }
+
+  // Array of features/geometries
+  if (Array.isArray(input)) {
+    return input
+      .filter((x: any) => x && (x.geometry || GEOJSON_GEOMETRY_TYPES.includes(x.type)))
+      .map((x: any) => {
+        if (x.type === 'Feature') return x
+        if (GEOJSON_GEOMETRY_TYPES.includes(x.type)) return { type: 'Feature', geometry: x, properties: {} }
+        if (x.geometry) return { type: 'Feature', geometry: x.geometry, properties: x.properties || {} }
+        return null
+      })
+      .filter(Boolean) as any
+  }
+
   return []
 }
 

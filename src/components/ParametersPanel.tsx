@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { userPerceivedWorkflow, workflowCriticalPath } from '../lib/perf'
 import { 
   ProjectParameters, 
@@ -1114,6 +1114,45 @@ function ParametersPanel({
     }
   }, [showGenerateExport, canContinueToGenerate])
 
+  // Assemble authoritative in-memory GeoJSON sources for export.
+  // These are not refetched; they are the same parcel/analysis data already
+  // loaded for the map and candidate-open-area calculation.
+  const exportContextGeoJSON = useMemo(() => {
+    const selectedParentParcel = parcelGeometry && parcelId
+      ? ({ type: 'Feature', properties: { PA_MCPI: parcelId, source: 'selected_parcel' }, geometry: parcelGeometry } as GeoJSON.Feature<GeoJSON.Geometry>)
+      : null
+
+    const candidateOpenAreaGeometry = candidateOpenArea?.candidateGeometry || null
+
+    const existingBuildings = existingConditions?.buildings?.features?.length
+      ? ({ type: 'FeatureCollection', features: existingConditions.buildings.features.filter((f: any) => f && f.geometry).map((f: any) => ({ ...f, properties: f.properties || {} })) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
+      : null
+
+    const hydrology = existingConditions?.hydrology?.features
+    const waterWetlandFeatures = [
+      ...(hydrology?.waterBodyFeatures || []),
+      ...(hydrology?.wetlandFeatures || []),
+      ...(hydrology?.streamDrainFeatures || [])
+    ].filter((f: any) => f && f.geometry)
+
+    const waterWetlands = waterWetlandFeatures.length
+      ? ({ type: 'FeatureCollection', features: waterWetlandFeatures.map((f: any) => ({ ...f, properties: f.properties || {} })) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
+      : null
+
+    const pavementFeatureArray = existingConditions?.pavement?.features?.features
+    const existingPavement = pavementFeatureArray?.length
+      ? ({ type: 'FeatureCollection', features: pavementFeatureArray.filter((f: any) => f && f.geometry).map((f: any) => ({ ...f, properties: f.properties || {} })) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
+      : null
+
+    return {
+      selectedParentParcel,
+      candidateOpenAreaGeometry,
+      existingBuildings,
+      waterWetlands,
+      existingPavement
+    }
+  }, [parcelGeometry, parcelId, candidateOpenArea, existingConditions])
+
   if (!parameters) {
     return <div className="p-4">Loading parameters...</div>
   }
@@ -1139,6 +1178,11 @@ function ParametersPanel({
           localStreetNetworkResult={localStreetNetworkResult}
           terrainSuitability={terrainSuitability}
           parentParcelAreaAcres={parentParcelAreaAcres}
+          selectedParcel={exportContextGeoJSON.selectedParentParcel}
+          candidateOpenArea={exportContextGeoJSON.candidateOpenAreaGeometry}
+          existingBuildings={exportContextGeoJSON.existingBuildings}
+          waterWetlands={exportContextGeoJSON.waterWetlands}
+          existingPavement={exportContextGeoJSON.existingPavement}
           conceptAlternatives={conceptAlternatives}
           recommendedAlternativeId={recommendedAlternativeId}
           authoritativeAlternativeId={authoritativeAlternativeId}
