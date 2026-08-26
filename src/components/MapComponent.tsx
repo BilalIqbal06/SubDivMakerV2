@@ -1833,19 +1833,7 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
   // Layout map-layer diagnostics
   useEffect(() => {
     if (!import.meta.env.DEV) return
-    console.log('[DevelopmentLayoutMap]', {
-      mcpi: conceptualLayout?.mcpi ?? selectedParcelMCPI,
-      resultExists: !!conceptualLayout,
-      lotGeometryCount: conceptualLayout?.lotCells.length ?? 0,
-      buildingEnvelopeGeometryCount: conceptualLayout?.buildingEnvelopes.length ?? 0,
-      developmentPadGeometryCount: conceptualLayout?.developmentPads.length ?? 0,
-      lotsVisible: showConceptualLots,
-      envelopesVisible: showBuildingEnvelopes,
-      padsVisible: showDevelopmentPads,
-      lotsPane: !!map?.getPane('conceptualLotsPane'),
-      envelopesPane: !!map?.getPane('buildingEnvelopesPane'),
-      padsPane: !!map?.getPane('developmentPadsPane')
-    })
+    
   }, [conceptualLayout, showConceptualLots, showBuildingEnvelopes, showDevelopmentPads, map, selectedParcelMCPI])
 
   // Toggle conceptual lots visibility
@@ -2006,11 +1994,7 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
 
         availableParcelsLayerRef.current = outlineLayer
 
-        console.debug('Parcel outline verification', {
-          recordsReceived: allFeatures.length,
-          validFeatures: validGeoJSONFeatures.length,
-          leafletOutlineLayers: outlineLayer.getLayers().length
-        })
+        
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {

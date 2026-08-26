@@ -529,19 +529,10 @@ function App() {
       }),
       (() => {
         const mcpi = feature.properties?.PA_MCPI
-        console.log('[HydrologyCallSite]', { mcpi, hasParcelGeometry: !!feature.geometry, parcelGeometryType: feature.geometry?.type, function: 'fetchHydrologyObstacles' })
+        
         return fetchHydrologyObstacles(feature.geometry, mcpi || '', abortController.signal)
       })().then(hydrology => {
-        console.log('[HydrologyCallSiteResult]', {
-          mcpi: feature.properties?.PA_MCPI,
-          resultExists: !!hydrology,
-          resultKeys: hydrology ? Object.keys(hydrology) : [],
-          hydrologyCoverageAvailable: hydrology?.hydrologyCoverageAvailable,
-          waterCount: hydrology?.waterBodyFeatures?.length,
-          wetlandCount: hydrology?.wetlandFeatures?.length,
-          streamCount: hydrology?.streamDrainFeatures?.length,
-          fetchError: hydrology?.fetchError
-        })
+        
         const state: 'success' | 'success-zero' | 'error' = hydrology.hydrologyCoverageAvailable ? 'success' : 'error'
         return { hydrology, state, error: hydrology.fetchError as string | undefined }
       }).catch(err => {
@@ -553,17 +544,10 @@ function App() {
       }),
       (() => {
         const mcpi = feature.properties?.PA_MCPI
-        console.log('[PavementCallSite]', { mcpi, hasParcelGeometry: !!feature.geometry, parcelGeometryType: feature.geometry?.type, function: 'fetchExistingPavementSurfaces' })
+        
         return fetchExistingPavementSurfaces(feature.geometry, mcpi || '', abortController.signal)
       })().then(pavement => {
-        console.log('[PavementCallSiteResult]', {
-          mcpi: feature.properties?.PA_MCPI,
-          resultExists: !!pavement,
-          coverageAvailable: pavement?.pavementCoverageAvailable,
-          parkingLotCount: pavement?.parkingLotFeatureCount,
-          drivewayCount: pavement?.drivewayFeatureCount,
-          fetchError: pavement?.fetchError
-        })
+        
         const state: 'success' | 'success-zero' | 'error' = pavement.pavementCoverageAvailable ? 'success' : 'error'
         return { pavement, state, error: pavement.fetchError as string | undefined }
       }).catch(err => {
@@ -1083,7 +1067,7 @@ function App() {
       visibleSelectedCount,
       invariant: visibleSelectedCount === 1 ? 'OK' : 'VIOLATION'
     }
-    console.log('[ConceptSelectionStateAudit]', audit)
+    
     if (visibleSelectedCount !== 1) {
       console.error('[ConceptSelectionInvariantViolation]', {
         expectedSelectedId: auth,
@@ -1470,19 +1454,10 @@ function App() {
           }),
           (() => {
             const draftMcpi = mcpi
-            console.log('[HydrologyCallSite]', { mcpi: draftMcpi, hasParcelGeometry: !!feature.geometry, parcelGeometryType: feature.geometry?.type, function: 'fetchHydrologyObstacles' })
+            
             return fetchHydrologyObstacles(feature.geometry, feature.properties?.PA_MCPI || draftMcpi, abortController.signal)
           })().then(hydrology => {
-            console.log('[HydrologyCallSiteResult]', {
-              mcpi,
-              resultExists: !!hydrology,
-              resultKeys: hydrology ? Object.keys(hydrology) : [],
-              hydrologyCoverageAvailable: hydrology?.hydrologyCoverageAvailable,
-              waterCount: hydrology?.waterBodyFeatures?.length,
-              wetlandCount: hydrology?.wetlandFeatures?.length,
-              streamCount: hydrology?.streamDrainFeatures?.length,
-              fetchError: hydrology?.fetchError
-            })
+            
             const state: 'success' | 'success-zero' | 'error' = hydrology.hydrologyCoverageAvailable ? 'success' : 'error'
             return { hydrology, state, error: hydrology.fetchError as string | undefined }
           }).catch(err => {
@@ -1493,17 +1468,10 @@ function App() {
             return { hydrology: { mcpi: conditionMcpi, selectionRequestId: conditionRunId, source: 'loudoun-gis', waterBodyFeatures: [], wetlandFeatures: [], streamDrainFeatures: [], hydrologyCoverageAvailable: false }, state: 'error' as const, error: err.message as string }
           }),
         (() => {
-            console.log('[PavementCallSite]', { mcpi, hasParcelGeometry: !!feature.geometry, parcelGeometryType: feature.geometry?.type, function: 'fetchExistingPavementSurfaces' })
+            
             return fetchExistingPavementSurfaces(feature.geometry, mcpi || '', abortController.signal)
           })().then(pavement => {
-            console.log('[PavementCallSiteResult]', {
-              mcpi,
-              resultExists: !!pavement,
-              coverageAvailable: pavement?.pavementCoverageAvailable,
-              parkingLotCount: pavement?.parkingLotFeatureCount,
-              drivewayCount: pavement?.drivewayFeatureCount,
-              fetchError: pavement?.fetchError
-            })
+            
             const state: 'success' | 'success-zero' | 'error' = pavement.pavementCoverageAvailable ? 'success' : 'error'
             return { pavement, state, error: pavement.fetchError as string | undefined }
           }).catch(err => {
@@ -1729,39 +1697,11 @@ function App() {
     if (local) {
       const candidateCount = local.candidateAudits?.length ?? 0
       const hardValidCandidateCount = local.candidateAudits?.filter(c => !c.rejectionReason || c.rejectionReason === '').length ?? 0
-      console.log('[LocalStreetBrowserResult]', {
-        mcpi: local.mcpi ?? selectedParcel?.feature.properties?.PA_MCPI,
-        resultExists: true,
-        status: local.status,
-        candidateCount,
-        hardValidCandidateCount,
-        localStreetCount: local.localStreetCount,
-        totalLocalStreetLengthFt: local.totalLocalStreetLengthFt,
-        localRowAreaAcres: local.localRowAreaAcres,
-        baselineLotCount: local.baselineLotCount,
-        finalLotCount: local.finalLotCount,
-        baselineUnusedProgrammableAcres: local.baselineUnusedProgrammableAcres,
-        finalUnusedProgrammableAcres: local.finalUnusedProgrammableAcres,
-        incrementalDrawableCapacity: local.incrementalDrawableCapacity,
-        stopReason: local.stopReason,
-        warnings: local.warnings
-      })
+      
     }
 
     if (conceptualLayout) {
-      console.log('[ConceptualDevelopmentLayout]', {
-        mcpi: conceptualLayout.mcpi,
-        resultExists: true,
-        status: conceptualLayout.status,
-        assignedZoneCount: conceptualLayout.assignedZoneCount,
-        lotCount: conceptualLayout.lotCount,
-        buildingEnvelopeCount: conceptualLayout.buildingEnvelopeCount,
-        developmentPadCount: conceptualLayout.developmentPadCount,
-        drawableResidentialCapacity: conceptualLayout.drawableResidentialCapacity,
-        layoutAreaAcres: conceptualLayout.layoutAreaAcres,
-        unusedProgrammableAreaAcres: conceptualLayout.unusedProgrammableAreaAcres,
-        warnings: conceptualLayout.warnings
-      })
+      
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -1789,60 +1729,11 @@ function App() {
     lastTownhomeAuditKeyRef.current = key
 
     const a = th.audit
-    console.log('[TownhomeGenerationAudit]', {
-      mcpi: th.mcpi,
-      selectedTownhomes: a.selectedTownhomes,
-      eligibleZoneCount: a.eligibleZoneCount,
-      frontageRunCount: a.frontageRunCount,
-      rowCandidates: a.rowCandidates,
-      acceptedRows: a.acceptedRows,
-      rejectedRows: a.rejectedRows,
-      unitCount: a.unitCount,
-      totalRowLengthFt: a.totalRowLengthFt,
-      totalLayoutAreaAcres: a.totalLayoutAreaAcres,
-      byRoadType: a.byRoadType,
-      byTerrainClass: a.byTerrainClass,
-      rejectionReasons: a.rejectionReasons
-    })
+    
 
     const accepted = a.rowAudits.filter(r => r.accepted)
     const rejected = a.rowAudits.filter(r => !r.accepted)
-    console.log('[TownhomeRowAudit]', {
-      sampleSize: 10,
-      first5Accepted: accepted.slice(0, 5).map(r => ({
-        rowId: r.rowId,
-        zoneId: r.zoneId,
-        frontageRoadId: r.frontageRoadId,
-        frontageRoadType: r.frontageRoadType,
-        frontageLengthFt: r.frontageLengthFt,
-        usableRowLengthFt: r.usableRowLengthFt,
-        rowDepthFt: r.rowDepthFt,
-        unitWidthFt: r.unitWidthFt,
-        unitCount: r.unitCount,
-        terrainAssessment: r.terrainAssessment,
-        hardConflictCount: r.hardConflictCount,
-        accepted: r.accepted,
-        qualityScore: r.qualityScore,
-        selectionRank: r.selectionRank
-      })),
-      first5Rejected: rejected.slice(0, 5).map(r => ({
-        rowId: r.rowId,
-        zoneId: r.zoneId,
-        frontageRoadId: r.frontageRoadId,
-        frontageRoadType: r.frontageRoadType,
-        frontageLengthFt: r.frontageLengthFt,
-        usableRowLengthFt: r.usableRowLengthFt,
-        rowDepthFt: r.rowDepthFt,
-        unitWidthFt: r.unitWidthFt,
-        unitCount: r.unitCount,
-        terrainAssessment: r.terrainAssessment,
-        hardConflictCount: r.hardConflictCount,
-        accepted: r.accepted,
-        rejectionReason: r.rejectionReason,
-        qualityScore: r.qualityScore,
-        selectionRank: r.selectionRank
-      }))
-    })
+    
 
     if (VERBOSE_GIS_DIAGNOSTICS) {
       console.log('[TownhomeFrontageAudit]', a.frontageAudit)
@@ -1879,40 +1770,9 @@ function App() {
     const slowestCumulativeStage = allStages[0]?.[0] ?? ''
     const secondSlowestStage = allStages[1]?.[0] ?? ''
 
-    console.log('[GenerationPerformanceAudit]', {
-      workflowRunId,
-      mcpi,
-      parcelAnalysisMs: timings.parcelAnalysis ?? 0,
-      existingConditionsMs: timings.existingConditions ?? 0,
-      candidateOpenAreaMs: timings.candidateOpenArea ?? 0,
-      primaryRoadMs: timings.primaryRoad ?? 0,
-      terrainFetchMs: timings.terrainFetch ?? 0,
-      terrainAnalysisMs: timings.terrainAnalysis ?? 0,
-      secondaryRoadMs: timings.secondaryRoad ?? 0,
-      developmentOpportunityMs: timings.developmentOpportunity ?? 0,
-      conceptualProgramMs: timings.conceptualProgram ?? 0,
-      baseLayoutMs: timings.baseLayout ?? 0,
-      localStreetMs: timings.localStreet ?? 0,
-      layoutWithLocalStreetMs: timings.layoutWithLocalStreet ?? 0,
-      townhomeMs: timings.townhome ?? 0,
-      mapLayerPreparationMs: timings.mapLayerPreparation ?? 0,
-      wallClockGenerationMs: round2(generationPerformance.getTotalMs()),
-      cumulativeGeneratorMs: round2(Object.values(timings).reduce((s, v) => s + v, 0)),
-      slowestCumulativeStage,
-      secondSlowestStage,
-      resultReadyTimestamp: Date.now()
-    })
+    
 
-    console.log('[GenerationRecomputeAudit]', {
-      ...recomputeCounter.get(),
-      primaryRoadRuns: recomputeCounter.get().primaryRoad ?? 0,
-      secondaryRoadRuns: recomputeCounter.get().secondaryRoad ?? 0,
-      opportunityRuns: recomputeCounter.get().opportunity ?? 0,
-      programRuns: recomputeCounter.get().program ?? 0,
-      layoutRuns: recomputeCounter.get().layout ?? 0,
-      localStreetRuns: recomputeCounter.get().localStreet ?? 0,
-      townhomeRuns: recomputeCounter.get().townhome ?? 0
-    })
+    
 
     const rc = recomputeCounter.get()
     const observedDevFullLayouts = rc.layout ?? 0
@@ -1923,26 +1783,10 @@ function App() {
     const uniqueSemanticFullLayouts = recomputeCounter.getUniqueCount('layout')
     const strictModeDuplicateFullLayouts = Math.max(0, observedDevFullLayouts - uniqueSemanticFullLayouts)
     const productionEquivalentFullLayouts = uniqueSemanticFullLayouts
-    console.log('[LayoutRunBreakdownAudit]', {
-      workflowRunId,
-      mcpi,
-      observedDevFullLayouts,
-      uniqueSemanticFullLayouts,
-      strictModeDuplicateFullLayouts,
-      productionEquivalentFullLayouts,
-      baselineFullLayouts,
-      candidateFullLayouts,
-      selectedFinalFullLayouts,
-      otherFullLayouts,
-      totalFullLayouts: observedDevFullLayouts
-    })
+    
 
     const network = networkCounter.get()
-    console.log('[GenerationNetworkAudit]', {
-      byCategory: network.byCategory,
-      duplicates: network.duplicates,
-      slowestCategory: network.slowestCategory
-    })
+    
 
     workflowCriticalPath.start('mapLayerPreparation')
     workflowTimeline.mark('mapLayersReady')
@@ -1952,22 +1796,7 @@ function App() {
     workflowTimeline.mark('workflowReady')
 
     const upwForCompletion = userPerceivedWorkflow.get()
-    console.log('[GenerationCompletionAudit]', {
-      mcpi,
-      primaryRoadReady: !!conceptualRoadResult,
-      secondaryRoadReady: !!secondaryRoadNetworkResult,
-      programReady: !!conceptualProgram,
-      baselineLayoutReady: !!baseLayout,
-      localStreetResultReady: !!localStreetNetworkResult,
-      selectedFinalLayoutReady: !!conceptualLayout,
-      townhomeResultReady: !!townhomeGenerationResult,
-      generateExportReady: !!upwForCompletion.generateExportReadyTimestamp,
-      localStreetStatus: localStreetNetworkResult?.status ?? 'missing',
-      stopReason: localStreetNetworkResult?.stopReason ?? 'NONE',
-      finalLotCount: conceptualLayout?.lotCount ?? baseLayout?.lotCount ?? 0,
-      townhomeRowCount: townhomeGenerationResult?.rowCount ?? 0,
-      townhomeUnitCount: townhomeGenerationResult?.unitCount ?? 0
-    })
+    
     const recomputeSnapshot = recomputeCounter.get()
     const bottleneckStages = Object.entries(timings)
       .filter(([_, v]) => v > 0)
@@ -1982,14 +1811,7 @@ function App() {
         uniqueSemanticExecutions: recomputeCounter.getUniqueCount(stage) ?? 0
       }))
     const largest = bottleneckStages[0]
-    console.log('[RemainingPerformanceBottleneckAudit]', {
-      mcpi,
-      totalWorkflowMs: round2(upwForCompletion.userPerceivedWallClockMs),
-      stages: bottleneckStages,
-      largestStage: largest?.stage ?? '',
-      largestStageMs: round2(largest?.totalMs ?? 0),
-      largestStagePercent: largest?.percentOfWorkflow ?? 0
-    })
+    
 
     if (VERBOSE_GIS_DIAGNOSTICS) {
       console.log('[TurfOperationAudit]', turfCounter.get())
@@ -2041,19 +1863,7 @@ function App() {
     const overlapMs = wcp.overlappingMeasuredMs
     const accountedStageMs = instrumentedCriticalPathMs
     const measurementErrorMs = round2(Math.max(0, upw.userPerceivedWallClockMs - (accountedStageMs + idleGapMs)))
-    console.log('[UserPerceivedWorkflowAudit]', {
-      workflowRunId,
-      mcpi,
-      userAnalyzeClickTimestamp: upw.userAnalyzeClickTimestamp,
-      generateExportReadyTimestamp: upw.generateExportReadyTimestamp,
-      userPerceivedWallClockMs: round2(upw.userPerceivedWallClockMs),
-      instrumentedCriticalPathMs,
-      missingBeforeCriticalPathMs,
-      accountedStageMs,
-      overlapMs,
-      idleGapMs,
-      measurementErrorMs
-    })
+    
 
     const tl = workflowTimeline.get()
     const stageKeys = Object.keys(tl.marks).sort((a, b) => tl.marks[a] - tl.marks[b])
@@ -2062,28 +1872,9 @@ function App() {
       const endMs = i < stageKeys.length - 1 ? tl.marks[stageKeys[i + 1]] : upw.generateExportReadyTimestamp || startMs
       return { name, startMs, endMs, durationMs: round2(endMs - startMs) }
     })
-    console.log('[EndToEndPerformanceAudit]', {
-      workflowRunId,
-      mcpi,
-      totalUserPerceivedMs: round2(upw.userPerceivedWallClockMs),
-      stages: endToEndStages,
-      largestGapMs: round2(tl.largestGapMs),
-      largestGapBetween: tl.largestGapBetween
-    })
+    
 
-    console.log('[WorkflowIntervalReconciliationAudit]', {
-      workflowRunId,
-      mcpi,
-      workflowWallClockMs: upw.userPerceivedWallClockMs,
-      measuredIntervalUnionMs: wcp.accountedWallClockMs,
-      exclusiveMeasuredMs: round2(Math.max(0, wcp.accountedWallClockMs - wcp.overlappingMeasuredMs)),
-      overlappingMeasuredMs: wcp.overlappingMeasuredMs,
-      idleUninstrumentedMs: wcp.unaccountedWallClockMs,
-      measurementCoveragePercent: wcp.accountedPercent,
-      intervals: wcp.stageDurations,
-      overlaps: wcp.overlaps,
-      gaps: wcp.gaps
-    })
+    
 
     const identityStages = ['existingConditions', 'candidateOpenArea', 'terrain', 'primaryRoad', 'secondaryRoad', 'opportunity', 'program', 'baselineLayout', 'localStreet', 'selectedFinalLayout', 'townhome', 'mapLayerPreparation']
     const identity = identityStages.map(stage => {
@@ -2107,12 +1898,12 @@ function App() {
         actualProductionDuplicateCount: info?.actualProductionDuplicateCount ?? 0
       }
     })
-    console.log('[WorkflowExecutionIdentityAudit]', { workflowRunId, mcpi, stages: identity })
+    
 
     const dupOpt = workflowResultCache.getAudit()
-    console.log('[DuplicateExecutionOptimizationAudit]', { workflowRunId, mcpi, stages: dupOpt })
+    
 
-    console.log('[DiagnosticOverheadAudit]', { workflowRunId, mcpi, ...diagnosticOverhead.get() })
+    
 
     const pipeline = ordered.map((stage) => {
       const all = recomputeCounter.getAll()
@@ -2130,86 +1921,33 @@ function App() {
         callers: ['App.tsx']
       }
     })
-    console.log('[PipelineExecutionAudit]', { workflowRunId, mcpi, stages: pipeline })
+    
 
     const turfByStage = turfCounter.getByStage()
     const perf = generationPerformance.get()
     const primaryTurf = turfByStage['primaryRoad'] || {}
     const primaryMs = perf['primaryRoad'] ?? 0
     const totalPrimaryTurf = Object.values(primaryTurf).reduce((s, v) => s + (v as number), 0)
-    console.log('[PrimaryRoadProfilingComplete]', {
-      workflowRunId,
-      mcpi,
-      candidateCount: (conceptualRoadResult as any)?.candidateCount ?? null,
-      totalMs: round2(primaryMs),
-      averageCandidateMs: null,
-      slowestStage: totalPrimaryTurf > 0 ? Object.entries(primaryTurf).sort((a, b) => (b[1] as number) - (a[1] as number))[0]?.[0] : null,
-      top5TurfOps: Object.entries(primaryTurf).sort((a, b) => (b[1] as number) - (a[1] as number)).slice(0, 5)
-    })
+    
 
     const stageDurations = wcp.stageDurations as { stage: string; durationMs: number }[]
     const baselineLayoutMs = stageDurations.find((s: { stage: string; durationMs: number }) => s.stage === 'baselineLayout')?.durationMs ?? perf['baselineLayout'] ?? 0
     const secondaryRoadMs = stageDurations.find((s: { stage: string; durationMs: number }) => s.stage === 'secondaryRoad')?.durationMs ?? perf['secondaryRoad'] ?? 0
-    console.log('[BaselineLayoutHotspotAudit]', {
-      workflowRunId,
-      mcpi,
-      totalMs: round2(baselineLayoutMs),
-      lotCount: (baseLayout as any)?.lotCount ?? null,
-      frontageSegmentCount: (baseLayout as any)?.lotFrontageGenerationAudit?.frontageSegments?.length ?? null,
-      polygonCount: (baseLayout as any)?.lotCells?.length ?? null,
-      turfOps: turfByStage['baselineLayout'] || {}
-    })
-    console.log('[SecondaryRoadHotspotAudit]', {
-      workflowRunId,
-      mcpi,
-      totalMs: round2(secondaryRoadMs),
-      turfOps: turfByStage['secondaryRoad'] || {}
-    })
+    
+    
 
     const townhomeTurf = turfByStage['townhome'] || {}
     const townhomeMs = perf['townhome'] ?? 0
     const acceptedRows = (townhomeGenerationResult as any)?.rows?.filter((r: any) => r.accepted)?.length ?? 0
     const totalUnits = (townhomeGenerationResult as any)?.rows?.reduce((sum: number, r: any) => sum + (r.unitEnvelopes?.length || 0), 0) ?? 0
-    console.log('[TownhomeHotspotAudit]', {
-      workflowRunId,
-      mcpi,
-      frontageRunCount: (townhomeGenerationResult as any)?.frontageRunCount ?? null,
-      acceptedRowCount: acceptedRows,
-      rejectedRowCount: ((townhomeGenerationResult as any)?.rows?.length ?? 0) - acceptedRows,
-      totalMs: round2(townhomeMs),
-      turfOps: townhomeTurf,
-      unitCount: totalUnits,
-      runs: recomputeCounter.getAll()['townhome']?.requestCount ?? 0
-    })
+    
 
     const baselineTurf = turfByStage['baselineLayout'] || {}
     const finalTurf = turfByStage['finalLayout'] || {}
-    console.log('[LayoutHotspotAudit]', {
-      workflowRunId,
-      mcpi,
-      runs: {
-        baseline: recomputeCounter.getAll()['layout-baseline']?.requestCount ?? 0,
-        final: recomputeCounter.getAll()['layout-final']?.requestCount ?? 0
-      },
-      baseline: {
-        totalMs: round2(perf['baselineLayout'] ?? 0),
-        turfOps: baselineTurf
-      },
-      final: {
-        totalMs: round2(perf['finalLayout'] ?? 0),
-        turfOps: finalTurf
-      },
-      candidateFullLayouts: recomputeCounter.get()['layout-candidate'] ?? 0
-    })
+    
 
     const map = mapRenderPerformance.get()
-    console.log('[MapRenderPerformanceAudit]', {
-      workflowRunId,
-      mcpi,
-      renderMs: round2(map.renderMs),
-      featureCounts: map.featureCounts,
-      layerTimings: map.layerTimings
-    })
+    
 
     const net = networkCounter.get()
     const netCategories = Object.keys(net.byCategory).map((cat) => {
@@ -2226,12 +1964,7 @@ function App() {
         averageRequestMs: count > 0 ? round2(totalMs / count) : 0
       }
     })
-    console.log('[WorkflowNetworkTimingAudit]', {
-      workflowRunId,
-      mcpi,
-      categories: netCategories,
-      slowestCategory: net.slowestCategory
-    })
+    
 
     const sm = strictModeExecutionInputsRef.current
     const buildStageAudit = (stage: 'program' | 'localStreet' | 'townhome') => {
@@ -2250,11 +1983,7 @@ function App() {
         likelyStrictModeDoubleInvokeReason: sameSemanticInputsOnBothExecutions ? 'STRICT_MODE_DEV_DOUBLE_INVOKE' : 'INPUTS_DIFFER_OR_COUNT_NE_2'
       }
     }
-    console.log('[StrictModeExecutionAudit]', {
-      program: buildStageAudit('program'),
-      localStreet: buildStageAudit('localStreet'),
-      townhome: buildStageAudit('townhome')
-    })
+    
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localStreetExpansion, isRoadGenerating, isAnalysisRunning])
 

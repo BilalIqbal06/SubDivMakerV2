@@ -1262,32 +1262,9 @@ export async function generateSecondaryRoadNetwork(
     .slice(0, 10)
     .map(([op, calls]) => ({ op, calls }))
 
-  console.log('[SecondaryRoadPerformanceAudit]', {
-    mcpi,
-    totalMs: Math.round(totalMs),
-    candidateCount: auditCandidateCount,
-    generateBranchCandidatesMs: Math.round(generateBranchCandidatesMs),
-    selectionLoopMs: Math.round(selectionLoopMs),
-    turfOps: topTurfOps,
-    turfOpCount: Object.values(secondaryTurfOps).reduce((s, c) => s + c, 0),
-    bboxCacheHits,
-    bboxCacheMisses,
-    selectedRoads: result.roads.length
-  })
+  
 
-  console.log('[SecondaryRoadOptimizationEquivalenceAudit]', {
-    mcpi,
-    status: result.status,
-    secondaryRoadCount: result.secondaryRoadCount,
-    totalSecondaryRoadLengthFt: Math.round(result.totalSecondaryRoadLengthFt),
-    primaryServedAreaSqFt: Math.round(result.primaryServedAreaSqFt),
-    secondaryNewlyServedAreaSqFt: Math.round(result.secondaryNewlyServedAreaSqFt),
-    totalNetworkServedAreaSqFt: Math.round(result.totalNetworkServedAreaSqFt),
-    residualUnservedDevelopableAreaSqFt: Math.round(result.residualUnservedDevelopableAreaSqFt),
-    roadIds: result.roads.map((r: any) => r.id),
-    equivalentToBaseline: true,
-    reason: 'All geometry, scoring, ranking, and selection invariants preserved; only repeated invariant calculations were memoized and point-in-polygon tests were bbox-short-circuited.'
-  })
+  
 
   if (VERBOSE_GIS_DIAGNOSTICS) {
     console.log('[SecondaryRoadNetworkResult]', {

@@ -359,15 +359,7 @@ export default function AuditPage() {
       const ymax = extent.ymax
       const bandWidth = (xmax - xmin) / 5
       
-      console.log('Layer Metadata:', {
-        id: layerMetadata.id,
-        geometryType: layerMetadata.geometryType,
-        extent: { xmin, ymin, xmax, ymax },
-        spatialReference: wkid,
-        supportsPagination: layerMetadata.supportsPagination,
-        supportsOrderBy: layerMetadata.supportsOrderBy,
-        maxRecordCount: layerMetadata.maxRecordCount
-      })
+      
       
       // Acreage classes
       const acreageClasses = [
@@ -398,7 +390,7 @@ export default function AuditPage() {
         })
         const countywideData = await countywideResponse.json()
         diagnosticCounts['Countywide'] = countywideData.count || 0
-        console.log('Countywide count:', diagnosticCounts['Countywide'])
+        
       } catch (e) {
         console.error('Countywide count error:', e)
         diagnosticCounts['Countywide'] = -1
@@ -439,7 +431,7 @@ export default function AuditPage() {
           } else {
             bandCounts.push(bandData.count || 0)
             diagnosticCounts[`Band ${bandIndex + 1}`] = bandCounts[bandIndex]
-            console.log(`Band ${bandIndex + 1} count:`, bandCounts[bandIndex])
+            
           }
         } catch (e) {
           console.error(`Band ${bandIndex + 1} query error:`, e)
@@ -486,7 +478,7 @@ export default function AuditPage() {
               bandAcreageMatrix[combinationKey] = -1
             } else {
               bandAcreageMatrix[combinationKey] = data.count || 0
-              console.log(`${combinationKey} count:`, bandAcreageMatrix[combinationKey])
+              
             }
           } catch (e) {
             console.error(`${combinationKey} query error:`, e)
@@ -857,8 +849,8 @@ export default function AuditPage() {
           
           candidateDiagnostics.uniqueValidCollected = uniqueCandidates.length
           
-          console.log(`Geometry candidate diagnostics:`, candidateDiagnostics)
-          console.log(`Geometry candidate pool: ${uniqueCandidates.length} unique, ${skippedCandidates} skipped, ${candidatePoolSize} total`)
+          
+          
           
           // Analyze geometry using ArcGIS rings or GeoJSON coordinates
           let bestCandidate = null

@@ -5030,20 +5030,10 @@ export async function generateConceptualRoadSkeleton(
 
     const measuredTurfMs = round3(byStageArr.reduce((sum, s) => sum + s.totalMs, 0))
 
-    console.log('[PrimaryRoadPointBreakdownAudit]', {
-      mcpi,
-      generationRunId,
-      primaryMs,
-      totalMeasuredTurfMs: measuredTurfMs,
-      substages: byStageArr
-    })
+    
 
     const reconciliation = inst.getReconciliation(primaryMs)
-    console.log('[PrimaryRoadRuntimeReconciliationAudit]', {
-      mcpi,
-      generationRunId,
-      ...reconciliation
-    })
+    
 
     const phaseArr = Object.entries(phaseTimings).map(([phase, p]) => ({
       phase,
@@ -5055,185 +5045,41 @@ export async function generateConceptualRoadSkeleton(
       percentOfPrimaryRoadTime: primaryMs > 0 ? round3((p.totalMs / primaryMs) * 100) : 0
     })).sort((a, b) => b.totalMs - a.totalMs)
 
-    console.log('[PrimaryRoadPhaseBreakdownAudit]', {
-      mcpi,
-      generationRunId,
-      primaryMs,
-      phases: phaseArr,
-      rankedPhases: phaseArr.slice(0, 16)
-    })
+    
 
-    console.log('[PrimaryRoadPointHotspotAudit]', {
-      mcpi,
-      generationRunId,
-      pointCalls: stats.pointCalls,
-      pointUniqueInputs: stats.pointUnique,
-      duplicatePointAllocations: stats.pointAllocationsSaved,
-      pointTotalMs: round3(stats.pointMs),
-      pointAverageMs: stats.pointCalls > 0 ? round3(stats.pointMs / stats.pointCalls) : 0,
-      pointMaxMs: round3(stats.pointMaxMs),
-      pipCalls: stats.pipCalls,
-      pipUniqueInputs: stats.pipUnique,
-      duplicatePipInputs: stats.pipMisses,
-      pipTotalMs: round3(stats.pipMs),
-      pipAverageMs: stats.pipCalls > 0 ? round3(stats.pipMs / stats.pipCalls) : 0,
-      pipMaxMs: round3(stats.pipMaxMs),
-      topCallers: ['generateConceptualRoadSkeleton']
-    })
+    
 
-    console.log('[PrimaryRoadPipCacheAudit]', {
-      mcpi,
-      generationRunId,
-      requests: stats.pipCalls,
-      uniqueSemanticRequests: stats.pipUnique,
-      cacheHits: stats.pipHits,
-      cacheMisses: stats.pipMisses,
-      hitRate: stats.pipCalls > 0 ? round3((stats.pipHits / stats.pipCalls) * 100) : 0,
-      bboxRejects: stats.bboxRejected,
-      rawBooleanPipCalls: stats.booleanPipExecuted,
-      msSpentInCacheLookup: round3(stats.pipMs),
-      msSpentInRawPip: round3(stats.pipMs),
-      msSavedEstimate: round3(stats.pipHits * (stats.pipMs / Math.max(1, stats.booleanPipExecuted))),
-      featureIdentityStable: true,
-      polygonWeakMapStable: true,
-      coordinateKeysStable: true,
-      optionKeyIncludesIgnoreBoundary: true,
-      mostCombinationsUnique: stats.pipHits < stats.pipMisses
-    })
+    
 
-    console.log('[PrimaryRoadPointAllocationAudit]', {
-      mcpi,
-      generationRunId,
-      pointRequests: stats.pointCalls,
-      uniqueCoordinatePairs: stats.pointUnique,
-      reusedPointFeatures: stats.pointReuse,
-      newPointFeaturesCreated: stats.pointUnique,
-      reuseRate: stats.pointCalls > 0 ? round3((stats.pointReuse / stats.pointCalls) * 100) : 0,
-      pointCreationMs: round3(stats.pointMs)
-    })
+    
 
     const dist = byStage['distance'] || { calls: 0, totalMs: 0, maxMs: 0 }
     const np = byStage['nearestPointOnLine'] || { calls: 0, totalMs: 0, maxMs: 0 }
     const ptl = byStage['pointToLineDistance'] || { calls: 0, totalMs: 0, maxMs: 0 }
 
-    console.log('[PrimaryRoadLoopHotspotAudit]', {
-      mcpi,
-      generationRunId,
-      ...instAudits.loopAudit
-    })
+    
 
-    console.log('[PrimaryRoadJsHotspotAudit]', {
-      mcpi,
-      generationRunId,
-      ...instAudits.jsAudit
-    })
+    
 
-    console.log('[PrimaryRoadFeatureAssemblyAudit]', {
-      mcpi,
-      generationRunId,
-      ...instAudits.featureAssemblyAudit
-    })
+    
 
-    console.log('[PrimaryRoadComplexityAudit]', {
-      mcpi,
-      generationRunId,
-      ...instAudits.complexityAudit
-    })
+    
 
-    console.log('[PrimaryRoadAsyncAudit]', {
-      mcpi,
-      generationRunId,
-      ...instAudits.asyncAudit
-    })
+    
 
-    console.log('[PrimaryRoadNearestPointDuplicateAudit]', {
-      mcpi,
-      generationRunId,
-      ...instAudits.nearestPointAudit
-    })
+    
 
-    console.log('[PrimaryRoadRoadDistanceAudit]', {
-      mcpi,
-      generationRunId,
-      nearestPointOnLine: {
-        calls: np.calls,
-        totalMs: round3(np.totalMs),
-        avgMs: np.calls > 0 ? round3(np.totalMs / np.calls) : 0,
-        maxMs: round3(np.maxMs)
-      },
-      distance: {
-        calls: dist.calls,
-        totalMs: round3(dist.totalMs),
-        avgMs: dist.calls > 0 ? round3(dist.totalMs / dist.calls) : 0,
-        maxMs: round3(dist.maxMs)
-      },
-      pointToLineDistance: {
-        calls: ptl.calls,
-        totalMs: round3(ptl.totalMs),
-        avgMs: ptl.calls > 0 ? round3(ptl.totalMs / ptl.calls) : 0,
-        maxMs: round3(ptl.maxMs)
-      }
-    })
+    
 
-    console.log('[PrimaryRoadLogicalCallerAudit]', {
-      mcpi,
-      generationRunId,
-      ...instAudits.logicalCallerAudit
-    })
+    
 
-    console.log('[PrimaryRoadSearchSpaceAudit]', {
-      mcpi,
-      generationRunId,
-      roadCandidatesEvaluated: attempts,
-      accessCandidatesTested: result.accessCandidatesTested,
-      ...instAudits.searchSpaceAudit
-    })
+    
 
-    console.log('[PrimaryRoadBBoxOptimizationAudit]', {
-      mcpi,
-      generationRunId,
-      pointTestsBefore: stats.pipCalls,
-      bboxRejected: stats.bboxRejected,
-      booleanPipExecuted: stats.booleanPipExecuted,
-      pipAvoidedPercent: stats.pipCalls > 0 ? round3(((stats.bboxRejected + stats.pipHits) / stats.pipCalls) * 100) : 0,
-      rawPipMs: round3(stats.pipMs)
-    })
+    
 
-    console.log('[PrimaryRoadOptimizationPerformanceAudit]', {
-      mcpi,
-      generationRunId,
-      baselinePrimaryRoadMs: baselineMs,
-      previousOptimizedPrimaryRoadMs: previousMs,
-      currentPrimaryRoadMs: primaryMs,
-      savedVsBaselineMs: round3(Math.max(0, baselineMs - primaryMs)),
-      percentReductionVsBaseline: baselineMs > 0 ? round3((Math.max(0, baselineMs - primaryMs) / baselineMs) * 100) : 0,
-      savedVsPreviousMs: round3(Math.max(0, previousMs - primaryMs)),
-      percentReductionVsPrevious: previousMs > 0 ? round3((Math.max(0, previousMs - primaryMs) / previousMs) * 100) : 0
-    })
+    
 
-    console.log('[PrimaryRoadOptimizationEquivalenceAudit]', {
-      mcpi,
-      generationRunId,
-      allEquivalent: true,
-      candidateCount: attempts,
-      winningCandidateId: null,
-      connectedStreet: (result as any).connectedStreet ?? undefined,
-      connectionType: result.connectionType,
-      connectionPoint: result.proposedAccessPoint?.geometry?.coordinates ?? null,
-      roadCenterline: result.proposedRoadCenterline?.geometry?.coordinates ?? null,
-      rowGeometry: result.proposedRightOfWay ? 'present' : 'absent',
-      roadLengthFeet: round3(result.proposedRoadLengthFeet),
-      rowAreaAcres: round3(result.rightOfWayAreaAcres ?? 0),
-      residualAreaAcres: round3(result.residualDevelopmentAreaAcres ?? 0),
-      componentUsed: result.candidateComponentUsed,
-      designScore: null,
-      servedDevelopableArea: null,
-      buildingIntersectionCount: 0,
-      hydrologyIntersectionCount: 0,
-      pavementIntersectionCount: 0,
-      mismatchCount: 0,
-      mismatches: []
-    })
+    
 
     const emittedAuditNames = [
       'PrimaryRoadPointBreakdownAudit',
@@ -5257,13 +5103,7 @@ export async function generateConceptualRoadSkeleton(
       'PrimaryRoadResultAssemblyAudit'
     ]
 
-    console.log('[PrimaryRoadProfilingComplete]', {
-      mcpi,
-      generationRunId,
-      primaryRoadWallClockMs: primaryMs,
-      auditCount: emittedAuditNames.length,
-      emittedAuditNames
-    })
+    
 
     const diagnosticAuditAssemblyMs = round3(performance.now() - auditStart)
     const resultAssemblyPhase = phaseTimings['resultAssembly'] || { totalMs: 0, callCount: 0, maxMs: 0, itemCount: 0 }
@@ -5274,28 +5114,7 @@ export async function generateConceptualRoadSkeleton(
     const savedMs = Math.max(0, round3(beforeMs - afterMs))
     const percentReduction = beforeMs > 0 ? round3((savedMs / beforeMs) * 100) : 0
 
-    console.log('[PrimaryRoadResultAssemblyAudit]', {
-      mcpi,
-      generationRunId,
-      totalMs: round3(resultAssemblyPhase.totalMs + diagnosticAuditAssemblyMs),
-      productionResultAssemblyMs: round3(resultAssemblyPhase.totalMs),
-      diagnosticAuditAssemblyMs,
-      steps: [
-        { label: 'terrainAwareAlternatives', calls: terrainAwarePhase.callCount, totalMs: round3(terrainAwarePhase.totalMs), maxMs: round3(terrainAwarePhase.maxMs) },
-        { label: 'resultAssembly', calls: resultAssemblyPhase.callCount, totalMs: round3(resultAssemblyPhase.totalMs), maxMs: round3(resultAssemblyPhase.maxMs) },
-        { label: 'diagnosticAuditAssembly', calls: 1, totalMs: diagnosticAuditAssemblyMs, maxMs: diagnosticAuditAssemblyMs }
-      ],
-      geometryObjectsCreated: (result.terrainAlternatives?.length ? result.terrainAlternatives.length + 3 : 3),
-      arraysCopied: (jsByOp.get('Array.from')?.calls ?? 0) + (jsByOp.get('Array.flat')?.calls ?? 0) + (jsByOp.get('Array.flatMap')?.calls ?? 0) + (jsByOp.get('structuredClone')?.calls ?? 0),
-      arrayIterations: instAudits.loopAudit.loops.reduce((s: number, l: any) => s + (l.iterations || 0), 0),
-      featureCollectionsCreated: instAudits.featureAssemblyAudit.featureCollectionCalls,
-      jsonSerializations: jsByOp.get('JSON.stringify')?.calls ?? 0,
-      optimizationApplied: 'resultAssembly timing re-scoped; audit emission isolated',
-      beforeMs,
-      afterMs,
-      secondsSaved: round3(savedMs / 1000),
-      percentReduction
-    })
+    
   }
 } finally {
     const primaryRoadWallClockMs = round3(performance.now() - primaryRoadStart)

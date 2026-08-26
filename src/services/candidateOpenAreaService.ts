@@ -981,13 +981,7 @@ function processHydrologyObstacles(
 
   if (!hydrologyFeatures.hydrologyCoverageAvailable) {
     const detail = hydrologyFeatures.fetchError ? `: ${hydrologyFeatures.fetchError}` : ' (no fetch error recorded)'
-    console.log('[HydrologyConversion]', {
-      mcpi,
-      source: 'all',
-      stage: 'input-check',
-      hydrologyCoverageAvailable: false,
-      fetchError: hydrologyFeatures.fetchError
-    })
+    
     return { ...empty, hydrologyCoverageAvailable: false, fetchError: hydrologyFeatures.fetchError, errors: [`Environmental/hydrology coverage is unavailable or incomplete${detail}`] }
   }
 
@@ -1032,14 +1026,7 @@ function processHydrologyObstacles(
     }
   }
 
-  console.log('[HydrologyConversion]', {
-    mcpi,
-    source: 'water',
-    rawFeatureCount: waterRaw,
-    convertedFeatureCount: waterValid,
-    rejectedFeatureCount: waterRaw - waterValid,
-    geometryTypes: Array.from(waterGeometryTypes)
-  })
+  
 
   let wetlandRaw = 0
   let wetlandValid = 0
@@ -1067,14 +1054,7 @@ function processHydrologyObstacles(
     }
   }
 
-  console.log('[HydrologyConversion]', {
-    mcpi,
-    source: 'wetlands',
-    rawFeatureCount: wetlandRaw,
-    convertedFeatureCount: wetlandValid,
-    rejectedFeatureCount: wetlandRaw - wetlandValid,
-    geometryTypes: Array.from(wetlandGeometryTypes)
-  })
+  
 
   let streamRaw = 0
   let streamNormalizedValid = 0
@@ -1125,14 +1105,7 @@ function processHydrologyObstacles(
     }
   }
 
-  console.log('[HydrologyConversion]', {
-    mcpi,
-    source: 'streams',
-    rawFeatureCount: streamRaw,
-    convertedFeatureCount: bufferedStreams.length,
-    rejectedFeatureCount: streamRaw - streamNormalizedValid,
-    geometryTypes: Array.from(streamGeometryTypes)
-  })
+  
 
   const parcelFeature = turf.feature(parcelGeometry)
 
@@ -1191,14 +1164,7 @@ function processHydrologyObstacles(
 
   logHydrologyClassificationAudit(mcpi, constraintResult)
 
-  console.log('[HydrologyClip]', {
-    mcpi,
-    beforeClipCount: allHydrology.length,
-    afterClipCount,
-    clippedAreaSqFt: area,
-    unionResultType: unionResult.result.geometry?.type || 'unknown',
-    clippedGeometryType: clipped.geometry?.type || 'unknown'
-  })
+  
 
   return {
     clippedGeometry: clipped,
@@ -1220,24 +1186,7 @@ function processHydrologyObstacles(
 
 function logHydrologyClassificationAudit(mcpi: string, result: HydrologyConstraintResult) {
   if (!import.meta.env.DEV) return
-  console.log('[HydrologyClassificationAudit]', {
-    mcpi,
-    waterBodyFeatureCount: result.waterBodyCount,
-    wetlandFeatureCount: result.wetlandCount,
-    streamFeatureCount: result.streamFeatureCount,
-    distinctWaterBodyTypes: result.distinctWaterBodyTypes,
-    distinctWetlandTypes: result.distinctWetlandTypes,
-    distinctDrainTypes: result.distinctDrainTypes,
-    distinctDrainClasses: result.distinctDrainClasses,
-    openWaterHardAvoidCount: result.classCounts.OPEN_WATER_HARD_AVOID,
-    majorWaterwayCorridorCount: result.classCounts.MAJOR_WATERWAY_CORRIDOR,
-    streamCorridorCount: result.classCounts.STREAM_CORRIDOR,
-    wetlandHighConstraintCount: result.classCounts.WETLAND_HIGH_CONSTRAINT,
-    uncertainHydrologyCount: result.classCounts.UNCERTAIN_HYDROLOGY,
-    combinedGeometryStillPresent: !!result.combinedHardObstacleGeometry,
-    candidateBehaviorUnchanged: true,
-    roadBehaviorUnchanged: true
-  })
+  
 }
 
 interface ProcessedPavement {
@@ -1303,16 +1252,7 @@ function processPavementSurfaces(
     }
   }
 
-  console.log('[PavementConversion]', {
-    mcpi,
-    source: 'loudoun-gis',
-    rawFeatureCount,
-    convertedFeatureCount: validPavements.length,
-    rejectedFeatureCount: rawFeatureCount - validPavements.length,
-    geometryTypes: Array.from(geometryTypes),
-    parkingLotFeatureCount,
-    drivewayFeatureCount
-  })
+  
 
   if (validPavements.length === 0) {
     return { ...empty, pavementCoverageAvailable: true, parkingLotFeatureCount, drivewayFeatureCount, pavementFeatureCount: 0 }
@@ -1340,15 +1280,7 @@ function processPavementSurfaces(
     afterClipCount = clipped.geometry.coordinates.length
   }
 
-  console.log('[PavementClip]', {
-    mcpi,
-    source: 'loudoun-gis',
-    beforeClipCount: validPavements.length,
-    afterClipCount,
-    pavementAreaSqFt: area,
-    unionResultType: unionResult.result.geometry?.type || 'unknown',
-    clippedGeometryType: clipped.geometry?.type || 'unknown'
-  })
+  
 
   return {
     clippedGeometry: clipped,

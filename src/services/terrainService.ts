@@ -1085,16 +1085,7 @@ export async function fetchTerrainContours(
       warnings
     }
 
-    console.log('[TerrainFetchSummary]', {
-      mcpi,
-      coverageAvailable: result.coverageAvailable,
-      contourCount: result.contourCount,
-      minElevationFt: result.minElevationFt,
-      maxElevationFt: result.maxElevationFt,
-      elevationRangeFt: result.elevationRangeFt,
-      source: result.source,
-      warnings: result.warnings.length
-    })
+    
 
     return result
   } catch (err: any) {

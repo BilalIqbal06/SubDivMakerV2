@@ -2055,25 +2055,7 @@ export async function generateLocalDevelopmentStreetExpansion(
   const roadNetworkSemanticKey = 'primary=' + (primaryRoadCandidateId ?? 'none') + ';secondary=' + secondaryRoadIds.join(',')
   const layoutSemanticKey = 'baselineLots=' + baseline.lotCount + ';finalLots=' + finalLayout.lotCount + ';baselineAcres=' + baseline.layoutAreaAcres + ';finalAcres=' + finalLayout.layoutAreaAcres
 
-  console.log('[Test4InputIdentityAudit]', {
-    mcpi,
-    workflowRunId: mcpi,
-    selectedDevelopmentTypes: programResult.selectedDevelopmentTypes,
-    targetDensity: programResult.targetDensity ?? null,
-    preferredLotSize: programResult.preferredLotSize ?? null,
-    roadNetworkPreference: (projectParameters as any)?.roads?.networkPreference ?? null,
-    primaryRoadCandidateId,
-    secondaryRoadCount: secondaryRoadIds.length,
-    secondaryRoadIds,
-    localStreetCandidateCount: fastEvaluationResults.length || benefitAudits.length,
-    selectedLocalStreetCandidateId: selected[0]?.id ?? null,
-    candidateOpenAreaAcres,
-    programZones: programResult.zones.map((z: any) => ({ id: z.id, bestCompatibleUse: z.bestCompatibleUse, areaAcres: z.areaAcres })),
-    parameterSnapshotSemanticKey,
-    roadNetworkSemanticKey,
-    layoutSemanticKey,
-    frozenReferenceMatch: 'no-frozen-data-in-workspace'
-  })
+  
 
   if (import.meta.env.DEV) {
     console.log('[LocalStreetPrefilterAudit]', {
@@ -2148,56 +2130,25 @@ export async function generateLocalDevelopmentStreetExpansion(
 
   // F. Layout run breakdown
   const rc = recomputeCounter.get()
-  console.log('[LayoutRunBreakdownAudit]', {
-    mcpi,
-    baselineFullLayouts: rc['layout-baseline'] ?? 0,
-    candidateFastEvaluations: fastCandidateStageTimings.length,
-    candidateFullLayouts: rc['layout-candidate'] ?? 0,
-    selectedFinalFullLayouts: rc['layout-final'] ?? 0,
-    totalFullLayouts: rc['layout'] ?? 0
-  })
+  
 
   // F. Generation performance and recompute summary
-  console.log('[GenerationPerformanceAudit]', generationPerformance.get())
-  console.log('[GenerationRecomputeAudit]', recomputeCounter.get())
+  
+  
 
   // B. Equivalence and regression audits (only when comparison is enabled)
   if (USE_COMPARE_LOCAL_STREET_EVALUATORS) {
-    console.log('[LocalStreetEvaluatorEquivalenceAudit]', {
-      mcpi,
-      useFast: USE_FAST_LOCAL_STREET_EVALUATOR,
-      comparisonCount: localStreetEquivalenceComparisons.length,
-      allEquivalent,
-      mismatchCount
-    })
+    
 
     if (oldWinner && fastWinner) {
-      console.log('[LocalStreetWinnerEquivalenceAudit]', {
-        mcpi,
-        oldWinnerCandidateId: oldWinner.id,
-        fastWinnerCandidateId: fastWinner.localId,
-        sameWinner: oldWinner.id === fastWinner.localId,
-        oldStopReason: selectedStop,
-        fastStopReason,
-        sameStopReason: selectedStop === fastStopReason
-      })
+      
     }
 
     if (mcpi === '083103527000') {
       const sameWinner = oldWinner?.id === fastWinner?.localId
       const sameStopReason = selectedStop === fastStopReason
       const regressionPassed = allEquivalent && mismatchCount === 0 && sameWinner && sameStopReason
-      console.log('[FastLocalStreetRegressionAudit]', {
-        mcpi,
-        regressionPassed,
-        allEquivalent,
-        mismatchCount,
-        sameWinner,
-        sameStopReason,
-        oldWinnerCandidateId: oldWinner?.id ?? null,
-        fastWinnerCandidateId: fastWinner?.localId ?? null,
-        selectedLocalStreetCandidateId: oldWinner?.id ?? null
-      })
+      
       if (!regressionPassed) {
         console.warn('[FastLocalStreetRegressionWarning]', {
           mcpi,

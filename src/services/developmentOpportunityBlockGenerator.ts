@@ -773,23 +773,5 @@ function logDevelopmentOpportunityBlocks(result: DevelopmentOpportunityBlockResu
     reasons: b.reasons
   }))
 
-  console.log('[DevelopmentOpportunityBlocks]', {
-    mcpi: result.mcpi,
-    status: result.status,
-    blockCount: result.blockCount,
-    highCount: result.highCount,
-    moderateCount: result.moderateCount,
-    lowCount: result.lowCount,
-    residualCount: result.residualCount,
-    totalBlockAreaAcres: result.totalBlockAreaAcres,
-    candidateOpenAreaSqFt: result.candidateOpenAreaSqFt,
-    proposedROWInsideCOASqFt: result.proposedROWInsideCOASqFt,
-    opportunityBlocksSqFt: result.opportunityBlocksSqFt,
-    conservationDifferenceSqFt: result.conservationDifferenceSqFt,
-    conservationPassed: result.conservationPassed,
-    roadServeableAreaAcres: result.roadServeableAreaAcres,
-    nearNetworkAreaAcres: result.nearNetworkAreaAcres,
-    latentNoNetworkAreaAcres: result.latentNoNetworkAreaAcres,
-    topBlocks
-  })
+  
 }

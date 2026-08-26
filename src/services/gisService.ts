@@ -836,7 +836,7 @@ async function queryHydrologySource(
   const params = new URLSearchParams(paramRecord)
   const requestUrl = url
 
-  console.log('[HydrologyFetchStart]', { mcpi, source: sourceName, requestUrl, geometryType: parcelGeometry?.type })
+  
 
   try {
     const response = await fetch(requestUrl, {
@@ -863,7 +863,7 @@ async function queryHydrologySource(
     const rawFeatureCount = Array.isArray(data?.features) ? data.features.length : 0
 
     const diagnostic = buildSourceDiagnostic(requestUrl, arcgisGeometry, params, response, data, rawFeatureCount)
-    console.log('[HydrologySourceResult]', { source: sourceName, ...diagnostic })
+    
 
     if (!response.ok) {
       throw new Error(`ArcGIS query failed: ${httpStatus} ${response.statusText}`)
@@ -943,15 +943,7 @@ export async function fetchHydrologyObstacles(
       }
     }
 
-    console.log('[HydrologyFetchComplete]', {
-      mcpi,
-      waterRaw: waterBodyFeatures.length,
-      wetlandsRaw: wetlandFeatures.length,
-      streamsRaw: drainResult.features?.length || 0,
-      streamsFiltered: streamDrainFeatures.length,
-      hydrologyCoverageAvailable,
-      fetchError
-    })
+    
 
     return result
   }, mcpi) as Promise<HydrologyData>
@@ -987,7 +979,7 @@ export async function fetchExistingPavementSurfaces(
       return { ...empty, fetchError: 'No parcel geometry provided' }
     }
 
-    console.log('[PavementParcelInput]', { mcpi, ...summarizeGeometryForLog(parcelGeometry) })
+    
 
     try {
       const arcgisGeometry = geoJsonPolygonToArcGisGeometry(parcelGeometry)
@@ -1022,15 +1014,7 @@ export async function fetchExistingPavementSurfaces(
         })
       }
 
-      console.log('[PavementFetchSummary]', {
-        mcpi,
-        source: 'loudoun-gis',
-        coverageAvailable: true,
-        rawFeatureCount: rawFeatures.length,
-        parkingLotFeatureCount,
-        drivewayFeatureCount,
-        fetchError: undefined
-      })
+      
 
       return {
         source: 'loudoun-gis',
