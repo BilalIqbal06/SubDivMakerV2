@@ -118,6 +118,17 @@ export interface PavementClassificationResult {
   reconfigurationEligiblePavementAreaSqFt: number
 }
 
+export interface InternalRoadTreatmentResult {
+  internalRoadTreatment: RedevelopmentInternalRoadTreatment | null
+  classificationBasis: 'PRESERVE_ALL_MODE' | 'CONSERVATIVE_NO_RELIABLE_INTERNAL_CLASSIFICATION'
+  mappedRoadFeatureCount: number
+  protectedExternalRoadCount: number
+  reconfigurationEligibleInternalRoadCount: number
+  protectedExternalRoadLengthFt: number
+  preservedInternalRoadLengthFt: number
+  reconfigurationEligibleInternalRoadLengthFt: number
+}
+
 export interface ZoningLotParameters {
   standardsSource: StandardsSource
   minLotArea?: number // square feet
@@ -388,6 +399,7 @@ export interface CandidateOpenAreaResult {
   wetlandFeatureCount: number
   streamFeatureCount: number
   pavementClassification?: PavementClassificationResult
+  internalRoadClassification?: InternalRoadTreatmentResult
   pavementGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   pavementAreaSqFt: number
   pavementAreaAcres: number

@@ -8,7 +8,9 @@ import {
   type BuildingClassificationResult,
   type RedevelopmentBuildingTreatment,
   type PavementClassificationResult,
-  type RedevelopmentPavementTreatment
+  type RedevelopmentPavementTreatment,
+  type InternalRoadTreatmentResult,
+  type RedevelopmentInternalRoadTreatment
 } from '../types/parameters'
 import { HydrologyData, PavementData } from './gisService'
 
@@ -295,6 +297,11 @@ export async function calculateCandidateOpenArea(
   warnings.push(...roadResult.warnings)
   errors.push(...roadResult.errors)
 
+  // Process internal-road / access treatment (no geometry change; all road
+  // geometry is treated as protected external/public access because the data
+  // source does not reliably distinguish internal circulation.)
+  const internalRoadResult = processInternalRoadTreatment(projectParameters, streetFeatures, mcpi)
+
   // Process hydrology / water bodies / wetlands / conceptual stream avoidance
   const hydrologyResult = processHydrologyObstacles(
     parcelGeometry,
@@ -492,6 +499,7 @@ export async function calculateCandidateOpenArea(
     wetlandFeatureCount: hydrologyResult.wetlandFeatureCount,
     streamFeatureCount: hydrologyResult.streamDrainCount,
     pavementClassification: pavementResult.classification ?? undefined,
+    internalRoadClassification: internalRoadResult,
     pavementGeometry: pavementResult.clippedGeometry || undefined,
     pavementAreaSqFt: pavementResult.area,
     pavementAreaAcres: pavementResult.area / 43560,
@@ -1380,6 +1388,68 @@ interface ProcessedPavement {
   pavementCoverageAvailable: boolean
 }
 
+function getInternalRoadTreatmentForClassification(
+  projectParameters?: ProjectParameters | null
+): { isRedevelopment: boolean; internalRoadTreatment: RedevelopmentInternalRoadTreatment | null } {
+  if (!projectParameters) {
+    return { isRedevelopment: false, internalRoadTreatment: null }
+  }
+  if (projectParameters.developmentApproach !== 'REDEVELOPMENT') {
+    return { isRedevelopment: false, internalRoadTreatment: null }
+  }
+  return {
+    isRedevelopment: true,
+    internalRoadTreatment: projectParameters.redevelopment?.internalRoadTreatment ?? null
+  }
+}
+
+function roadFeatureLengthFt(f: any): number {
+  try {
+    const geom = f?.geometry
+    if (!geom) return 0
+    const type = geom.type
+    if (type === 'LineString' || type === 'MultiLineString') {
+      const miles = turf.length(geom, { units: 'miles' })
+      return isFinite(miles) && miles >= 0 ? miles * 5280 : 0
+    }
+  } catch (e) {
+    // ignore malformed road geometry
+  }
+  return 0
+}
+
+function processInternalRoadTreatment(
+  projectParameters: ProjectParameters | null | undefined,
+  streetFeatures: any[],
+  mcpi: string = ''
+): InternalRoadTreatmentResult {
+  const { isRedevelopment, internalRoadTreatment } = getInternalRoadTreatmentForClassification(projectParameters)
+
+  // Current architecture: street features come from the external/public road
+  // network (intersecting + nearby streets). There is no reliably separate
+  // internal-road/privately-owned-circulation data source. Therefore we always
+  // protect the mapped street network and report zero reconfiguration-eligible
+  // internal road geometry. ALLOW_RECONFIGURATION is recorded but does not
+  // relax any hard constraint.
+  const protectedExternalRoadLengthFt = streetFeatures.reduce((sum, f) => sum + roadFeatureLengthFt(f), 0)
+
+  const classificationBasis: InternalRoadTreatmentResult['classificationBasis'] =
+    internalRoadTreatment === 'ALLOW_RECONFIGURATION'
+      ? 'CONSERVATIVE_NO_RELIABLE_INTERNAL_CLASSIFICATION'
+      : 'PRESERVE_ALL_MODE'
+
+  return {
+    internalRoadTreatment,
+    classificationBasis,
+    mappedRoadFeatureCount: streetFeatures.length,
+    protectedExternalRoadCount: streetFeatures.length,
+    reconfigurationEligibleInternalRoadCount: 0,
+    protectedExternalRoadLengthFt,
+    preservedInternalRoadLengthFt: 0,
+    reconfigurationEligibleInternalRoadLengthFt: 0
+  }
+}
+
 // Selective reconfiguration classification constants
 const LARGE_PAVEMENT_THRESHOLD = 0.45
 const MATERIAL_PAVEMENT_SHARE_THRESHOLD = 0.25
@@ -1845,6 +1915,7 @@ export function createFailedResult(
     pavementFeatureCount: 0,
     pavementCoverageAvailable: false,
     pavementClassification: undefined,
+    internalRoadClassification: undefined,
     buildingClassification: undefined
   }
 }
