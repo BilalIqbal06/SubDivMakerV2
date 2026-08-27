@@ -104,6 +104,20 @@ export interface BuildingClassificationResult {
   redevelopmentEligibleBuildingAreaSqFt: number
 }
 
+export interface PavementClassificationResult {
+  pavementTreatment: RedevelopmentPavementTreatment | null
+  totalPavementCount: number
+  preservedPavementCount: number
+  reconfigurationEligiblePavementCount: number
+  preservedPavementObjectIds: (string | number)[]
+  reconfigurationEligiblePavementObjectIds: (string | number)[]
+  preservedPavementReasons: string[]
+  reconfigurationEligiblePavementReasons: string[]
+  largestPavementAreaSqFt: number
+  preservedPavementAreaSqFt: number
+  reconfigurationEligiblePavementAreaSqFt: number
+}
+
 export interface ZoningLotParameters {
   standardsSource: StandardsSource
   minLotArea?: number // square feet
@@ -373,6 +387,7 @@ export interface CandidateOpenAreaResult {
   waterFeatureCount: number
   wetlandFeatureCount: number
   streamFeatureCount: number
+  pavementClassification?: PavementClassificationResult
   pavementGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   pavementAreaSqFt: number
   pavementAreaAcres: number

@@ -6,7 +6,9 @@ import {
   type ClassifiedHydrologyFeature,
   type ProjectParameters,
   type BuildingClassificationResult,
-  type RedevelopmentBuildingTreatment
+  type RedevelopmentBuildingTreatment,
+  type PavementClassificationResult,
+  type RedevelopmentPavementTreatment
 } from '../types/parameters'
 import { HydrologyData, PavementData } from './gisService'
 
@@ -308,6 +310,7 @@ export async function calculateCandidateOpenArea(
     parcelGeometry,
     pavementFeatures,
     mcpi,
+    projectParameters,
     signal
   )
   if (pavementResult.coverageError) {
@@ -488,6 +491,7 @@ export async function calculateCandidateOpenArea(
     waterFeatureCount: hydrologyResult.waterFeatureCount,
     wetlandFeatureCount: hydrologyResult.wetlandFeatureCount,
     streamFeatureCount: hydrologyResult.streamDrainCount,
+    pavementClassification: pavementResult.classification ?? undefined,
     pavementGeometry: pavementResult.clippedGeometry || undefined,
     pavementAreaSqFt: pavementResult.area,
     pavementAreaAcres: pavementResult.area / 43560,
@@ -534,7 +538,7 @@ const LARGE_FOOTPRINT_THRESHOLD = 0.45
 const MATERIAL_SHARE_THRESHOLD = 0.25
 const EDGE_PROXIMITY_FT = 100
 
-function buildingCentroidDistanceToParcelBoundaryFt(
+function featureCentroidDistanceToParcelBoundaryFt(
   building: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
 ): number {
@@ -576,6 +580,21 @@ function getBuildingTreatmentForClassification(
   return {
     isRedevelopment: true,
     buildingTreatment: projectParameters.redevelopment?.buildingTreatment ?? null
+  }
+}
+
+function getPavementTreatmentForClassification(
+  projectParameters?: ProjectParameters | null
+): { isRedevelopment: boolean; pavementTreatment: RedevelopmentPavementTreatment | null } {
+  if (!projectParameters) {
+    return { isRedevelopment: false, pavementTreatment: null }
+  }
+  if (projectParameters.developmentApproach !== 'REDEVELOPMENT') {
+    return { isRedevelopment: false, pavementTreatment: null }
+  }
+  return {
+    isRedevelopment: true,
+    pavementTreatment: projectParameters.redevelopment?.pavementTreatment ?? null
   }
 }
 
@@ -657,7 +676,7 @@ function processBuildingFootprints(
     const f = validBuildings[i]
     const area = buildingAreas[i]
     const objectId = f.properties?.OBJECTID ?? f.properties?.objectid ?? f.properties?.id
-    const distanceToBoundaryFt = buildingCentroidDistanceToParcelBoundaryFt(f, parcelGeometry)
+    const distanceToBoundaryFt = featureCentroidDistanceToParcelBoundaryFt(f, parcelGeometry)
 
     let preserved = true
     let reason = 'PRIMARY_OR_LARGE_FOOTPRINT'
@@ -1350,6 +1369,8 @@ function logHydrologyClassificationAudit(mcpi: string, result: HydrologyConstrai
 interface ProcessedPavement {
   clippedGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null
   area: number
+  preservedArea: number
+  classification: PavementClassificationResult | null
   warnings: string[]
   errors: string[]
   parkingLotFeatureCount: number
@@ -1359,10 +1380,16 @@ interface ProcessedPavement {
   pavementCoverageAvailable: boolean
 }
 
+// Selective reconfiguration classification constants
+const LARGE_PAVEMENT_THRESHOLD = 0.45
+const MATERIAL_PAVEMENT_SHARE_THRESHOLD = 0.25
+const PAVEMENT_EDGE_PROXIMITY_FT = 100
+
 function processPavementSurfaces(
   parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon,
   pavementFeatures: PavementData | null | undefined,
   mcpi: string = '',
+  projectParameters?: ProjectParameters | null,
   signal?: AbortSignal
 ): ProcessedPavement {
   const warnings: string[] = []
@@ -1370,6 +1397,8 @@ function processPavementSurfaces(
   const empty: ProcessedPavement = {
     clippedGeometry: null,
     area: 0,
+    preservedArea: 0,
+    classification: null,
     warnings,
     errors,
     parkingLotFeatureCount: 0,
@@ -1410,39 +1439,141 @@ function processPavementSurfaces(
     }
   }
 
-  
-
   if (validPavements.length === 0) {
     return { ...empty, pavementCoverageAvailable: true, parkingLotFeatureCount, drivewayFeatureCount, pavementFeatureCount: 0 }
   }
 
-  const unionResult = unionPolygonFeatures(validPavements)
-  if (!unionResult.success || !unionResult.result) {
-    errors.push(`Pavement union failed: ${unionResult.error}`)
+  const { isRedevelopment, pavementTreatment } = getPavementTreatmentForClassification(projectParameters)
+
+  const pavementAreas = validPavements.map(f => turf.area(f) * 10.7639)
+  const largestPavementArea = pavementAreas.length > 0 ? Math.max(...pavementAreas) : 0
+  const totalPavementArea = pavementAreas.reduce((sum, a) => sum + a, 0)
+
+  const preservedFeatures: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[] = []
+  const eligibleFeatures: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[] = []
+  const preservedObjectIds: (string | number)[] = []
+  const eligibleObjectIds: (string | number)[] = []
+  const preservedPavementReasons: string[] = []
+  const reconfigurationEligiblePavementReasons: string[] = []
+
+  for (let i = 0; i < validPavements.length; i++) {
+    const f = validPavements[i]
+    const area = pavementAreas[i]
+    const objectId = f.properties?.OBJECTID ?? f.properties?.objectid ?? f.properties?.id
+    const distanceToBoundaryFt = featureCentroidDistanceToParcelBoundaryFt(f, parcelGeometry)
+
+    let preserved = true
+    let reason = 'PRIMARY_OR_LARGE_PAVEMENT'
+
+    if (!isRedevelopment || pavementTreatment === 'PRESERVE_ALL') {
+      preserved = true
+      reason = 'NEW_DEVELOPMENT_PRESERVE_ALL'
+    } else if (pavementTreatment === 'BROAD_REDEVELOPMENT') {
+      preserved = false
+      reason = 'BROAD_REDEVELOPMENT_MODE'
+    } else if (pavementTreatment === 'SELECTIVE_RECONFIGURATION') {
+      const relativeToLargest = largestPavementArea > 0 ? area / largestPavementArea : 0
+      const shareOfMappedPavementArea = totalPavementArea > 0 ? area / totalPavementArea : 0
+
+      const isLargeOrPrimary = relativeToLargest >= LARGE_PAVEMENT_THRESHOLD
+      const isMaterialShare = shareOfMappedPavementArea >= MATERIAL_PAVEMENT_SHARE_THRESHOLD
+      const isParcelEdgeAdjacent = distanceToBoundaryFt <= PAVEMENT_EDGE_PROXIMITY_FT
+
+      preserved = isLargeOrPrimary || isMaterialShare || isParcelEdgeAdjacent
+
+      if (preserved) {
+        if (isLargeOrPrimary) {
+          reason = 'PRIMARY_OR_LARGE_PAVEMENT'
+        } else if (isMaterialShare) {
+          reason = 'MATERIAL_SHARE_OF_EXISTING_PAVEMENT'
+        } else {
+          reason = 'PARCEL_EDGE_ADJACENT'
+        }
+      } else {
+        reason = 'SMALL_INTERIOR_PAVEMENT'
+      }
+    }
+
+    if (preserved) {
+      preservedFeatures.push(f)
+      if (objectId != null) preservedObjectIds.push(objectId)
+      preservedPavementReasons.push(reason)
+    } else {
+      eligibleFeatures.push(f)
+      if (objectId != null) eligibleObjectIds.push(objectId)
+      reconfigurationEligiblePavementReasons.push(reason)
+    }
+  }
+
+  // Union all valid pavement for total mapped pavement area
+  const allUnionResult = unionPolygonFeatures(validPavements)
+  if (!allUnionResult.success || !allUnionResult.result) {
+    errors.push(`Pavement union failed: ${allUnionResult.error}`)
     return { ...empty, pavementCoverageAvailable: true, parkingLotFeatureCount, drivewayFeatureCount, pavementFeatureCount: validPavements.length }
   }
 
   const parcelFeature = turf.feature(parcelGeometry)
-  const intersectResult = intersectPolygonFeatures(unionResult.result, parcelFeature)
-  if (!intersectResult.success || !intersectResult.result) {
+  const allIntersectResult = intersectPolygonFeatures(allUnionResult.result, parcelFeature)
+  if (!allIntersectResult.success || !allIntersectResult.result) {
     warnings.push('Could not clip pavement features to the parcel boundary')
     return { ...empty, pavementCoverageAvailable: true, parkingLotFeatureCount, drivewayFeatureCount, pavementFeatureCount: validPavements.length }
   }
 
-  const clipped = intersectResult.result
-  const area = turf.area(clipped) * 10.7639
-  let afterClipCount = 0
-  if (clipped.geometry.type === 'Polygon') {
-    afterClipCount = 1
-  } else if (clipped.geometry.type === 'MultiPolygon') {
-    afterClipCount = clipped.geometry.coordinates.length
+  const allClipped = allIntersectResult.result
+  const totalArea = allClipped ? turf.area(allClipped) * 10.7639 : 0
+
+  // Build preserved-pavement hard constraint union
+  let clipped: GeoJSON.Feature<GeoJSON.Geometry> | null = null
+  let preservedArea = 0
+
+  if (preservedFeatures.length > 0) {
+    const preservedUnionResult = unionPolygonFeatures(preservedFeatures)
+    if (preservedUnionResult.success && preservedUnionResult.result) {
+      const preservedIntersectResult = intersectPolygonFeatures(preservedUnionResult.result, parcelFeature)
+      if (preservedIntersectResult.success && preservedIntersectResult.result) {
+        clipped = preservedIntersectResult.result
+        preservedArea = turf.area(clipped) * 10.7639
+      }
+    }
   }
 
-  
+  const preservedPavementArea = preservedFeatures.reduce((sum, _, i) => {
+    const idx = validPavements.indexOf(preservedFeatures[i])
+    return sum + (idx >= 0 ? pavementAreas[idx] : 0)
+  }, 0)
+  const eligiblePavementArea = eligibleFeatures.reduce((sum, _, i) => {
+    const idx = validPavements.indexOf(eligibleFeatures[i])
+    return sum + (idx >= 0 ? pavementAreas[idx] : 0)
+  }, 0)
+
+  let afterClipCount = 0
+  if (clipped) {
+    if (clipped.geometry.type === 'Polygon') {
+      afterClipCount = 1
+    } else if (clipped.geometry.type === 'MultiPolygon') {
+      afterClipCount = clipped.geometry.coordinates.length
+    }
+  }
+
+  const classification: PavementClassificationResult = {
+    pavementTreatment,
+    totalPavementCount: validPavements.length,
+    preservedPavementCount: preservedFeatures.length,
+    reconfigurationEligiblePavementCount: eligibleFeatures.length,
+    preservedPavementObjectIds: preservedObjectIds,
+    reconfigurationEligiblePavementObjectIds: eligibleObjectIds,
+    preservedPavementReasons,
+    reconfigurationEligiblePavementReasons,
+    largestPavementAreaSqFt: largestPavementArea,
+    preservedPavementAreaSqFt: preservedPavementArea,
+    reconfigurationEligiblePavementAreaSqFt: eligiblePavementArea
+  }
 
   return {
     clippedGeometry: clipped,
-    area,
+    area: totalArea,
+    preservedArea,
+    classification,
     warnings,
     errors,
     parkingLotFeatureCount,
@@ -1713,6 +1844,7 @@ export function createFailedResult(
     drivewayFeatureCount: 0,
     pavementFeatureCount: 0,
     pavementCoverageAvailable: false,
+    pavementClassification: undefined,
     buildingClassification: undefined
   }
 }
