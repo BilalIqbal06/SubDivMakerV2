@@ -68,6 +68,42 @@ export interface ExistingFeaturePreferences {
   preserveUtilities: boolean
 }
 
+export type DevelopmentApproach = 'NEW_DEVELOPMENT' | 'REDEVELOPMENT'
+
+export type RedevelopmentBuildingTreatment =
+  | 'PRESERVE_ALL'
+  | 'SELECTIVE_REPLACEMENT'
+  | 'BROAD_REDEVELOPMENT'
+
+export type RedevelopmentPavementTreatment =
+  | 'PRESERVE_ALL'
+  | 'SELECTIVE_RECONFIGURATION'
+  | 'BROAD_REDEVELOPMENT'
+
+export type RedevelopmentInternalRoadTreatment =
+  | 'PRESERVE_ACCESS'
+  | 'ALLOW_RECONFIGURATION'
+
+export interface RedevelopmentPreferences {
+  buildingTreatment: RedevelopmentBuildingTreatment
+  pavementTreatment: RedevelopmentPavementTreatment
+  internalRoadTreatment: RedevelopmentInternalRoadTreatment
+}
+
+export interface BuildingClassificationResult {
+  buildingTreatment: RedevelopmentBuildingTreatment | null
+  totalBuildingCount: number
+  preservedBuildingCount: number
+  redevelopmentEligibleBuildingCount: number
+  preservedBuildingObjectIds: (string | number)[]
+  redevelopmentEligibleObjectIds: (string | number)[]
+  preservedBuildingReasons: string[]
+  redevelopmentEligibleBuildingReasons: string[]
+  largestBuildingAreaSqFt: number
+  preservedBuildingAreaSqFt: number
+  redevelopmentEligibleBuildingAreaSqFt: number
+}
+
 export interface ZoningLotParameters {
   standardsSource: StandardsSource
   minLotArea?: number // square feet
@@ -281,6 +317,8 @@ export interface ProjectParameters {
   schemaVersion: 1
   parcelId: string
   projectMode: ProjectMode
+  developmentApproach: DevelopmentApproach
+  redevelopment: RedevelopmentPreferences
   existingFeatures: ExistingFeaturePreferences
   developmentProgram: DevelopmentUse[]
   zoningAndLots: ZoningLotParameters
@@ -324,6 +362,7 @@ export interface CandidateOpenAreaResult {
   warnings: string[]
   errors: string[]
   calculatedAt: string
+  buildingClassification?: BuildingClassificationResult
   candidateGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   buildingUnionGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   roadCorridorGeometry?: GeoJSON.Feature<GeoJSON.Geometry>

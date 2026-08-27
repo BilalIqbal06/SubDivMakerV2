@@ -13,7 +13,10 @@ import {
   CandidateOpenAreaResult,
   ConceptualRoadSkeletonResult,
   SecondaryRoadNetworkResult,
-  DevelopmentOpportunityBlockResult
+  DevelopmentOpportunityBlockResult,
+  SubmittedParameters,
+  DevelopmentApproach,
+  RedevelopmentPreferences
 } from '../types/parameters'
 import type { ConceptualDevelopmentProgramResult } from '../services/conceptualDevelopmentProgram'
 import type { ConceptualDevelopmentLayoutResult } from '../services/conceptualDevelopmentLayout'
@@ -23,7 +26,6 @@ import type { TerrainSuitabilityResult } from '../types/terrain'
 import { deriveRecommendedParameters, getSimplifiedFromProjectParameters, applySimplifiedToProjectParameters, SimplifiedParameters, SimplifiedDevelopmentIntensity } from '../services/recommendedParametersService'
 import GenerateExportPanel from './GenerateExportPanel'
 import { calculateCandidateOpenArea, createFailedResult } from '../services/candidateOpenAreaService'
-import { SubmittedParameters } from '../types/parameters'
 import type { ConceptAlternativeResult, ConceptStrategy } from '../types/conceptAlternatives'
 import ThemedSelect from './ThemedSelect'
 import { flushSync } from 'react-dom'
@@ -85,6 +87,12 @@ function createEditableAnalysisFingerprint(parameters: ProjectParameters): any {
     })
 
   return {
+    developmentApproach: parameters.developmentApproach ?? 'NEW_DEVELOPMENT',
+    redevelopment: {
+      buildingTreatment: parameters.redevelopment?.buildingTreatment ?? 'SELECTIVE_REPLACEMENT',
+      pavementTreatment: parameters.redevelopment?.pavementTreatment ?? 'SELECTIVE_RECONFIGURATION',
+      internalRoadTreatment: parameters.redevelopment?.internalRoadTreatment ?? 'PRESERVE_ACCESS'
+    },
     developmentProgram,
     zoningAndLots: {
       standardsSource: normalizeStr(zoningAndLots.standardsSource),
@@ -322,7 +330,7 @@ function ParametersPanel({
   onSelectAlternative,
   onGenerateExportVisibilityChange
 }: ParametersPanelProps) {
-  const [expandedSections, setExpandedSections] = useState<string[]>(['dev-type', 'intensity', 'site-prefs'])
+  const [expandedSections, setExpandedSections] = useState<string[]>(['dev-approach', 'dev-type', 'intensity', 'site-prefs'])
   const [parameters, setParameters] = useState<ProjectParameters | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [candidateOpenArea, setCandidateOpenArea] = useState<CandidateOpenAreaResult | null>(null)
@@ -550,6 +558,12 @@ function ParametersPanel({
     schemaVersion: 1,
     parcelId,
     projectMode: 'selective-redevelopment',
+    developmentApproach: 'NEW_DEVELOPMENT',
+    redevelopment: {
+      buildingTreatment: 'SELECTIVE_REPLACEMENT',
+      pavementTreatment: 'SELECTIVE_RECONFIGURATION',
+      internalRoadTreatment: 'PRESERVE_ACCESS'
+    },
     existingFeatures: {
       buildingTreatment: 'preserve-all',
       roadTreatment: 'preserve-all',
@@ -908,6 +922,7 @@ function ParametersPanel({
         ],
         hydrologyFeatures: existingConditions.hydrology?.features || null,
         pavementFeatures: existingConditions.pavement?.features || null,
+        projectParameters: parameters,
         signal,
         analysisRunId: newAnalysisRunId
       }
@@ -1190,6 +1205,8 @@ function ParametersPanel({
           isAlternativeGenerating={isAlternativeGenerating}
           onSelectAlternative={onSelectAlternative}
           parcelFeasibilityAssessment={parcelFeasibilityAssessment}
+          submittedParameters={submittedParameters}
+          onSaveDraft={saveDraft}
         />
       </div>
     )
@@ -1237,6 +1254,27 @@ function ParametersPanel({
             isAnalyzing={isAnalyzing}
             candidateOpenArea={candidateOpenArea}
           />
+        </CollapsibleSection>
+
+        {/* Section 1.5: Development Approach */}
+        <CollapsibleSection
+          id="dev-approach"
+          title="Development Approach"
+          expanded={expandedSections.includes('dev-approach')}
+          onToggle={toggleSection}
+        >
+          <DevelopmentApproachSection
+            value={parameters.developmentApproach}
+            onChange={(v) => setParameters({ ...parameters, developmentApproach: v })}
+          />
+          {parameters.developmentApproach === 'REDEVELOPMENT' && (
+            <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--card-border)' }}>
+              <RedevelopmentTreatmentSection
+                value={parameters.redevelopment}
+                onChange={(updates) => setParameters({ ...parameters, redevelopment: { ...parameters.redevelopment, ...updates } })}
+              />
+            </div>
+          )}
         </CollapsibleSection>
 
         {/* Recommended Starting Point */}
@@ -2272,6 +2310,133 @@ function GenerationGoalSection({ value, onChange }: { value: GenerationPrioritie
   )
 }
 
+// Section 1A: Development Approach
+function DevelopmentApproachSection({
+  value,
+  onChange
+}: {
+  value: DevelopmentApproach
+  onChange: (v: DevelopmentApproach) => void
+}) {
+  const options = [
+    {
+      key: 'NEW_DEVELOPMENT',
+      label: 'New Development',
+      description: 'Plan primarily within available/developable land while preserving existing development.'
+    },
+    {
+      key: 'REDEVELOPMENT',
+      label: 'Redevelopment',
+      description: 'Evaluate conceptual replacement or reconfiguration of existing development within the selected parcel.'
+    }
+  ]
+
+  return (
+    <div className="space-y-2">
+      {options.map((opt) => (
+        <label
+          key={opt.key}
+          className={`flex flex-col p-3 rounded-lg cursor-pointer border transition-colors ${
+            value === opt.key ? 'bg-[#8ED8C0]/20 border-[#8ED8C0]' : ''
+          }`}
+          style={value !== opt.key ? {
+            background: 'linear-gradient(135deg, rgba(5, 8, 7, 0.96) 0%, rgba(11, 33, 27, 0.96) 65%, rgba(24, 76, 61, 0.9) 100%)',
+            border: '1px solid #40826D'
+          } : undefined}
+        >
+          <div className="flex items-center">
+            <input
+              type="radio"
+              name="developmentApproach"
+              value={opt.key}
+              checked={value === opt.key}
+              onChange={() => onChange(opt.key as DevelopmentApproach)}
+              className="mr-3"
+            />
+            <span className="text-sm font-semibold">{opt.label}</span>
+          </div>
+          <span className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{opt.description}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
+// Section 1B: Redevelopment Site Treatment
+function RedevelopmentTreatmentSection({
+  value,
+  onChange
+}: {
+  value: RedevelopmentPreferences
+  onChange: (updates: Partial<RedevelopmentPreferences>) => void
+}) {
+  const groups = [
+    {
+      key: 'buildingTreatment',
+      label: 'Existing Buildings',
+      options: [
+        { value: 'PRESERVE_ALL', label: 'Preserve All' },
+        { value: 'SELECTIVE_REPLACEMENT', label: 'Allow Selective Replacement' },
+        { value: 'BROAD_REDEVELOPMENT', label: 'Allow Broad Redevelopment' }
+      ]
+    },
+    {
+      key: 'pavementTreatment',
+      label: 'Existing Pavement',
+      options: [
+        { value: 'PRESERVE_ALL', label: 'Preserve All' },
+        { value: 'SELECTIVE_RECONFIGURATION', label: 'Allow Selective Reconfiguration' },
+        { value: 'BROAD_REDEVELOPMENT', label: 'Allow Broad Redevelopment' }
+      ]
+    },
+    {
+      key: 'internalRoadTreatment',
+      label: 'Existing Internal Roads / Access',
+      options: [
+        { value: 'PRESERVE_ACCESS', label: 'Preserve Existing Access' },
+        { value: 'ALLOW_RECONFIGURATION', label: 'Allow Internal Road Reconfiguration' }
+      ]
+    }
+  ]
+
+  return (
+    <div className="space-y-4">
+      <p className="text-[11px] leading-[1.4]" style={{ color: 'var(--text-secondary)' }}>
+        Redevelopment settings describe which existing site elements may be considered for conceptual replacement in future redevelopment generation. Current mapped constraints remain enforced unless explicitly supported by the generation engine.
+      </p>
+      {groups.map((g) => (
+        <div key={g.key} className="space-y-2">
+          <h5 className="text-sm font-semibold">{g.label}</h5>
+          <div className="space-y-1">
+            {g.options.map((opt) => (
+              <label
+                key={opt.value}
+                className={`flex items-center p-2 rounded-lg cursor-pointer border transition-colors ${
+                  value[g.key as keyof RedevelopmentPreferences] === opt.value ? 'bg-[#8ED8C0]/20 border-[#8ED8C0]' : ''
+                }`}
+                style={value[g.key as keyof RedevelopmentPreferences] !== opt.value ? {
+                  background: 'linear-gradient(135deg, rgba(5, 8, 7, 0.96) 0%, rgba(11, 33, 27, 0.96) 65%, rgba(24, 76, 61, 0.9) 100%)',
+                  border: '1px solid #40826D'
+                } : undefined}
+              >
+                <input
+                  type="radio"
+                  name={g.key}
+                  value={opt.value}
+                  checked={value[g.key as keyof RedevelopmentPreferences] === opt.value}
+                  onChange={() => onChange({ [g.key]: opt.value } as Partial<RedevelopmentPreferences>)}
+                  className="mr-3"
+                />
+                <span className="text-sm">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // Section 9: Applied Parameters (shows submitted parameters after analysis)
 function AppliedParametersSection({
   submittedParameters,
@@ -2355,10 +2520,21 @@ function AppliedParametersSection({
         onToggle={() => toggle('devParams')}
       >
         <div className="space-y-1 text-xs">
+          <div className="flex justify-between"><span className="text-slate-400">Development approach</span><span className="text-white">{parameters.developmentApproach?.replace(/_/g, ' ') ?? 'New Development'}</span></div>
           <div className="flex justify-between"><span className="text-slate-400">Development type</span><span className="text-white">{parameters.developmentProgram?.filter(d => d.enabled).map(d => d.useType).join(', ') || 'None'}</span></div>
           <div className="flex justify-between"><span className="text-slate-400">Intensity</span><span className="text-white">{simplified.developmentIntensity}</span></div>
           <div className="flex justify-between"><span className="text-slate-400">Site priorities</span><span className="text-white text-right">{sitePriorities}</span></div>
           <div className="flex justify-between"><span className="text-slate-400">Road network</span><span className="text-white">{simplified.roadNetwork}</span></div>
+          {parameters.developmentApproach === 'REDEVELOPMENT' && (
+            <>
+              <div className="flex justify-between"><span className="text-slate-400">Existing building treatment</span><span className="text-white">{parameters.redevelopment?.buildingTreatment?.replace(/_/g, ' ') ?? '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Existing pavement treatment</span><span className="text-white">{parameters.redevelopment?.pavementTreatment?.replace(/_/g, ' ') ?? '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Internal road treatment</span><span className="text-white">{parameters.redevelopment?.internalRoadTreatment?.replace(/_/g, ' ') ?? '—'}</span></div>
+              <p className="text-[10px] leading-[1.3] mt-2" style={{ color: 'var(--text-secondary)' }}>
+                Redevelopment settings describe which existing site elements may be considered for conceptual replacement in future redevelopment generation. Current mapped constraints remain enforced unless explicitly supported by the generation engine.
+              </p>
+            </>
+          )}
         </div>
       </CollapsibleSection>
 

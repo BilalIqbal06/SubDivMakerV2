@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FileJson, Globe, ArrowLeft, Save, Loader, CheckCircle2, AlertTriangle, ChevronDown } from 'lucide-react'
 import type { ConceptAlternativeResult, ConceptAlternativeMetricSources, ConceptStrategy, ConceptAlternativeMetricSource } from '../types/conceptAlternatives'
-import { ConceptualRoadSkeletonResult, SecondaryRoadNetworkResult, DevelopmentOpportunityBlockResult } from '../types/parameters'
+import { ConceptualRoadSkeletonResult, SecondaryRoadNetworkResult, DevelopmentOpportunityBlockResult, SubmittedParameters } from '../types/parameters'
 import type { TerrainSuitabilityResult } from '../types/terrain'
 import type { ConceptualDevelopmentProgramResult } from '../services/conceptualDevelopmentProgram'
 import { canonicalUseType, type ConceptualDevelopmentLayoutResult } from '../services/conceptualDevelopmentLayout'
@@ -36,6 +36,8 @@ interface GenerateExportPanelProps {
   onSelectAlternative?: (id: ConceptStrategy) => void
   parcelFeasibilityAssessment?: ParcelFeasibilityAssessment | null
   terrainSuitability?: TerrainSuitabilityResult | null
+  submittedParameters?: SubmittedParameters | null
+  onSaveDraft?: () => void
 }
 
 const SQFT_PER_ACRE = 43560
@@ -423,7 +425,9 @@ export default function GenerateExportPanel({
   isAlternativeGenerating,
   onSelectAlternative,
   parcelFeasibilityAssessment,
-  terrainSuitability
+  terrainSuitability,
+  submittedParameters,
+  onSaveDraft
 }: GenerateExportPanelProps) {
   const hasResult = !!conceptualRoadResult && (conceptualRoadResult.status === 'generated' || conceptualRoadResult.status === 'warning')
   const mcpi = conceptualRoadResult?.mcpi ?? ''
@@ -903,7 +907,9 @@ export default function GenerateExportPanel({
         name: PROJECT_NAME,
         schemaVersion: SCHEMA_VERSION,
         generatedAt,
-        conceptualOnly: true
+        conceptualOnly: true,
+        developmentApproach: submittedParameters?.parameters?.developmentApproach ?? 'NEW_DEVELOPMENT',
+        redevelopment: submittedParameters?.parameters?.redevelopment ?? null
       },
       parcel: {
         mcpi,
@@ -1027,6 +1033,8 @@ export default function GenerateExportPanel({
 
     const features: GeoJSON.Feature<GeoJSON.Geometry>[] = []
     const generatedAt = new Date().toISOString()
+    const developmentApproach = submittedParameters?.parameters?.developmentApproach ?? 'NEW_DEVELOPMENT'
+
     const commonProps: Record<string, any> = {
       project: PROJECT_NAME,
       schemaVersion: SCHEMA_VERSION,
@@ -1035,6 +1043,7 @@ export default function GenerateExportPanel({
       strategy: activeStrategy,
       featureType: null,
       conceptualOnly: true,
+      developmentApproach,
       coordinateReferenceSystem: 'EPSG:4326',
       generatedAt
     }
@@ -1174,6 +1183,19 @@ export default function GenerateExportPanel({
           Concept feasibility memo and handoff exports
         </p>
       </div>
+
+      <CollapsibleSection id="dev-approach" title="Development Approach" defaultOpen={false}>
+        {fmtLabel('Development approach', submittedParameters?.parameters?.developmentApproach?.replace(/_/g, ' ') ?? 'New Development')}
+        {submittedParameters?.parameters?.developmentApproach === 'REDEVELOPMENT' && (
+          <CollapsibleSection id="redevelopment-treatment" title="Existing Site Treatment" defaultOpen={false}>
+            <div className="space-y-0.5">
+              {fmtLabel('Existing building treatment', submittedParameters.parameters.redevelopment.buildingTreatment.replace(/_/g, ' '))}
+              {fmtLabel('Existing pavement treatment', submittedParameters.parameters.redevelopment.pavementTreatment.replace(/_/g, ' '))}
+              {fmtLabel('Internal road treatment', submittedParameters.parameters.redevelopment.internalRoadTreatment.replace(/_/g, ' '))}
+            </div>
+          </CollapsibleSection>
+        )}
+      </CollapsibleSection>
 
       {!hasResult && (
         <button
@@ -1683,10 +1705,13 @@ export default function GenerateExportPanel({
                 )}
                 <button
                   type="button"
-                  disabled
-                  className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium opacity-60 cursor-not-allowed"
+                  disabled={!onSaveDraft}
+                  onClick={() => onSaveDraft?.()}
+                  className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium transition-all ${
+                    onSaveDraft ? '' : 'opacity-60 cursor-not-allowed'
+                  }`}
                   style={{ background: 'transparent', color: 'var(--soft-seafoam)', border: '1px solid var(--viridian)' }}
-                  title="Save draft is not yet implemented"
+                  title={onSaveDraft ? 'Save the current project parameters to drafts' : 'Save draft is not available'}
                 >
                   <Save className="w-4 h-4" />
                   Save Draft
@@ -1694,7 +1719,7 @@ export default function GenerateExportPanel({
               </div>
             </div>
             <p className="text-[11px] leading-[1.4] mt-3" style={{ color: 'var(--text-secondary)' }}>
-              Exports the feasibility memo as JSON and the conceptual geometry as a GeoJSON feature collection. "Save Draft" is a planned placeholder and not yet active. All output is conceptual and must be reviewed by a licensed civil engineer before survey, entitlement, permitting, or construction use.
+              Exports the feasibility memo as JSON and the conceptual geometry as a GeoJSON feature collection. Save Draft stores the current parcel and parameter state; generated geometry is not persisted and can be recreated by re-running the workflow. All output is conceptual and must be reviewed by a licensed civil engineer before survey, entitlement, permitting, or construction use.
             </p>
           </CollapsibleSection>
         </>

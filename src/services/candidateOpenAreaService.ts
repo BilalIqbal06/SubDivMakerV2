@@ -3,7 +3,10 @@ import {
   CandidateOpenAreaResult,
   type HydrologyConstraintClass,
   type HydrologyConstraintResult,
-  type ClassifiedHydrologyFeature
+  type ClassifiedHydrologyFeature,
+  type ProjectParameters,
+  type BuildingClassificationResult,
+  type RedevelopmentBuildingTreatment
 } from '../types/parameters'
 import { HydrologyData, PavementData } from './gisService'
 
@@ -25,6 +28,7 @@ export interface CalculateCandidateOpenAreaOptions {
   streetFeatures: any[]
   hydrologyFeatures?: HydrologyData | null
   pavementFeatures?: PavementData | null
+  projectParameters?: ProjectParameters | null
   signal?: AbortSignal
   analysisRunId?: number
 }
@@ -246,6 +250,7 @@ export async function calculateCandidateOpenArea(
     streetFeatures,
     hydrologyFeatures,
     pavementFeatures,
+    projectParameters,
     signal,
     analysisRunId = 0
   } = input
@@ -273,6 +278,7 @@ export async function calculateCandidateOpenArea(
   const buildingResult = processBuildingFootprints(
     parcelGeometry,
     buildingFeatures,
+    projectParameters,
     signal
   )
   warnings.push(...buildingResult.warnings)
@@ -470,6 +476,7 @@ export async function calculateCandidateOpenArea(
     warnings,
     errors,
     calculatedAt: new Date().toISOString(),
+    buildingClassification: buildingResult.classification ?? undefined,
     candidateGeometry: candidateResult.geometry || undefined,
     buildingUnionGeometry: buildingResult.clippedGeometry || undefined,
     roadCorridorGeometry: roadResult.clippedGeometry || undefined,
@@ -510,6 +517,8 @@ function logHydrologySummary(hydrologyResult: ProcessedHydrology, mcpi: string) 
 interface ProcessedBuildings {
   clippedGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null
   area: number
+  preservedArea: number
+  classification: BuildingClassificationResult | null
   warnings: string[]
   errors: string[]
   buildingsLoaded: number
@@ -520,9 +529,60 @@ interface ProcessedBuildings {
   unionResultType: string
 }
 
+// Selective replacement classification constants
+const LARGE_FOOTPRINT_THRESHOLD = 0.45
+const MATERIAL_SHARE_THRESHOLD = 0.25
+const EDGE_PROXIMITY_FT = 100
+
+function buildingCentroidDistanceToParcelBoundaryFt(
+  building: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+  parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon
+): number {
+  try {
+    const centroid = turf.centroid(building)
+    const rings: number[][][] = []
+
+    if (parcelGeometry.type === 'Polygon') {
+      rings.push(parcelGeometry.coordinates[0])
+    } else if (parcelGeometry.type === 'MultiPolygon') {
+      for (const polygon of parcelGeometry.coordinates) {
+        rings.push(polygon[0]) // outer ring only
+      }
+    }
+
+    let minMiles = Infinity
+    for (const ring of rings) {
+      const line = turf.lineString(ring)
+      const d = turf.pointToLineDistance(centroid, line, { units: 'miles' })
+      if (d < minMiles) minMiles = d
+    }
+
+    if (!isFinite(minMiles) || minMiles < 0) return Infinity
+    return minMiles * 5280
+  } catch (e) {
+    return Infinity
+  }
+}
+
+function getBuildingTreatmentForClassification(
+  projectParameters?: ProjectParameters | null
+): { isRedevelopment: boolean; buildingTreatment: RedevelopmentBuildingTreatment | null } {
+  if (!projectParameters) {
+    return { isRedevelopment: false, buildingTreatment: null }
+  }
+  if (projectParameters.developmentApproach !== 'REDEVELOPMENT') {
+    return { isRedevelopment: false, buildingTreatment: null }
+  }
+  return {
+    isRedevelopment: true,
+    buildingTreatment: projectParameters.redevelopment?.buildingTreatment ?? null
+  }
+}
+
 function processBuildingFootprints(
   parcelGeometry: GeoJSON.Polygon | GeoJSON.MultiPolygon,
   buildingFeatures: any[],
+  projectParameters?: ProjectParameters | null,
   signal?: AbortSignal
 ): ProcessedBuildings {
   const warnings: string[] = []
@@ -563,6 +623,8 @@ function processBuildingFootprints(
     return {
       clippedGeometry: null,
       area: 0,
+      preservedArea: 0,
+      classification: null,
       warnings,
       errors,
       buildingsLoaded: buildingFeatures.length,
@@ -574,35 +636,83 @@ function processBuildingFootprints(
     }
   }
 
-  // Union all valid buildings
-  const unionResult = unionPolygonFeatures(validBuildings)
-  if (!unionResult.success || !unionResult.result) {
-    errors.push(`Building union failed: ${unionResult.error}`)
-    return {
-      clippedGeometry: null,
-      area: 0,
-      warnings,
-      errors,
-      buildingsLoaded: buildingFeatures.length,
-      duplicatesRemoved,
-      validPolygons: validBuildings.length,
-      invalidSkipped: skippedCount,
-      clippedCount: 0,
-      unionResultType: 'failed'
+  // Determine redevelopment treatment
+  const { isRedevelopment, buildingTreatment } = getBuildingTreatmentForClassification(projectParameters)
+
+  // Calculate each building's area and the largest area for the classification rule
+  const buildingAreas = validBuildings.map(f => turf.area(f) * 10.7639)
+  const largestBuildingArea = buildingAreas.length > 0 ? Math.max(...buildingAreas) : 0
+
+  // Classify buildings into preserved / redevelopment-eligible
+  const preservedFeatures: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[] = []
+  const eligibleFeatures: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>[] = []
+  const preservedObjectIds: (string | number)[] = []
+  const eligibleObjectIds: (string | number)[] = []
+  const preservedBuildingReasons: string[] = []
+  const redevelopmentEligibleBuildingReasons: string[] = []
+
+  const totalBuildingArea = buildingAreas.reduce((sum, a) => sum + a, 0)
+
+  for (let i = 0; i < validBuildings.length; i++) {
+    const f = validBuildings[i]
+    const area = buildingAreas[i]
+    const objectId = f.properties?.OBJECTID ?? f.properties?.objectid ?? f.properties?.id
+    const distanceToBoundaryFt = buildingCentroidDistanceToParcelBoundaryFt(f, parcelGeometry)
+
+    let preserved = true
+    let reason = 'PRIMARY_OR_LARGE_FOOTPRINT'
+
+    if (!isRedevelopment || buildingTreatment === 'PRESERVE_ALL') {
+      preserved = true
+      reason = 'NEW_DEVELOPMENT_PRESERVE_ALL'
+    } else if (buildingTreatment === 'BROAD_REDEVELOPMENT') {
+      preserved = false
+      reason = 'BROAD_REDEVELOPMENT_MODE'
+    } else if (buildingTreatment === 'SELECTIVE_REPLACEMENT') {
+      const relativeToLargest = largestBuildingArea > 0 ? area / largestBuildingArea : 0
+      const shareOfMappedBuildingArea = totalBuildingArea > 0 ? area / totalBuildingArea : 0
+
+      const isLargeOrPrimary = relativeToLargest >= LARGE_FOOTPRINT_THRESHOLD
+      const isMaterialShare = shareOfMappedBuildingArea >= MATERIAL_SHARE_THRESHOLD
+      const isParcelEdgeAdjacent = distanceToBoundaryFt <= EDGE_PROXIMITY_FT
+
+      preserved = isLargeOrPrimary || isMaterialShare || isParcelEdgeAdjacent
+
+      if (preserved) {
+        if (isLargeOrPrimary) {
+          reason = 'PRIMARY_OR_LARGE_FOOTPRINT'
+        } else if (isMaterialShare) {
+          reason = 'MATERIAL_SHARE_OF_EXISTING_BUILDING_AREA'
+        } else {
+          reason = 'PARCEL_EDGE_ADJACENT'
+        }
+      } else {
+        reason = 'SMALL_INTERIOR_FOOTPRINT'
+      }
+    }
+
+    if (preserved) {
+      preservedFeatures.push(f)
+      if (objectId != null) preservedObjectIds.push(objectId)
+      preservedBuildingReasons.push(reason)
+    } else {
+      eligibleFeatures.push(f)
+      if (objectId != null) eligibleObjectIds.push(objectId)
+      redevelopmentEligibleBuildingReasons.push(reason)
     }
   }
 
-  const buildingUnion = unionResult.result
-  const unionResultType = buildingUnion.geometry?.type || 'unknown'
+  // Union all valid buildings for total mapped building area
+  const allUnionResult = unionPolygonFeatures(validBuildings)
+  const unionResultType = allUnionResult.success && allUnionResult.result ? (allUnionResult.result.geometry?.type || 'unknown') : 'failed'
 
-  // Clip union to parcel
-  const parcelFeature = turf.feature(parcelGeometry)
-  const intersectResult = intersectPolygonFeatures(buildingUnion, parcelFeature)
-  if (!intersectResult.success) {
-    errors.push(`Building clipping failed: ${intersectResult.error}`)
+  if (!allUnionResult.success || !allUnionResult.result) {
+    errors.push(`Building union failed: ${allUnionResult.error}`)
     return {
       clippedGeometry: null,
       area: 0,
+      preservedArea: 0,
+      classification: null,
       warnings,
       errors,
       buildingsLoaded: buildingFeatures.length,
@@ -614,36 +724,84 @@ function processBuildingFootprints(
     }
   }
 
-  const clipped = intersectResult.result
-  if (!clipped) {
+  // Clip all-building union to parcel for total mapped building area
+  const parcelFeature = turf.feature(parcelGeometry)
+  const allIntersectResult = intersectPolygonFeatures(allUnionResult.result, parcelFeature)
+  if (!allIntersectResult.success) {
+    errors.push(`Building clipping failed: ${allIntersectResult.error}`)
+    return {
+      clippedGeometry: null,
+      area: 0,
+      preservedArea: 0,
+      classification: null,
+      warnings,
+      errors,
+      buildingsLoaded: buildingFeatures.length,
+      duplicatesRemoved,
+      validPolygons: validBuildings.length,
+      invalidSkipped: skippedCount,
+      clippedCount: 0,
+      unionResultType
+    }
+  }
+
+  const allClipped = allIntersectResult.result
+  const totalArea = allClipped ? turf.area(allClipped) * 10.7639 : 0
+  if (!allClipped) {
     // Empty intersection is valid (buildings outside parcel)
     warnings.push(`No buildings intersect the parcel boundary`)
-    return {
-      clippedGeometry: null,
-      area: 0,
-      warnings,
-      errors,
-      buildingsLoaded: buildingFeatures.length,
-      duplicatesRemoved,
-      validPolygons: validBuildings.length,
-      invalidSkipped: skippedCount,
-      clippedCount: 0,
-      unionResultType
+  }
+
+  // Build preserved-building hard constraint union (empty for broad redevelopment)
+  let clipped: GeoJSON.Feature<GeoJSON.Geometry> | null = null
+  let preservedArea = 0
+
+  if (preservedFeatures.length > 0) {
+    const preservedUnionResult = unionPolygonFeatures(preservedFeatures)
+    if (preservedUnionResult.success && preservedUnionResult.result) {
+      const preservedIntersectResult = intersectPolygonFeatures(preservedUnionResult.result, parcelFeature)
+      if (preservedIntersectResult.success && preservedIntersectResult.result) {
+        clipped = preservedIntersectResult.result
+        preservedArea = turf.area(clipped) * 10.7639
+      }
     }
   }
 
-  const area = turf.area(clipped) * 10.7639
+  const preservedBuildingArea = preservedFeatures.reduce((sum, _, i) => {
+    const idx = validBuildings.indexOf(preservedFeatures[i])
+    return sum + (idx >= 0 ? buildingAreas[idx] : 0)
+  }, 0)
+  const eligibleBuildingArea = eligibleFeatures.reduce((sum, _, i) => {
+    const idx = validBuildings.indexOf(eligibleFeatures[i])
+    return sum + (idx >= 0 ? buildingAreas[idx] : 0)
+  }, 0)
+
+  const classification: BuildingClassificationResult = {
+    buildingTreatment,
+    totalBuildingCount: validBuildings.length,
+    preservedBuildingCount: preservedFeatures.length,
+    redevelopmentEligibleBuildingCount: eligibleFeatures.length,
+    preservedBuildingObjectIds: preservedObjectIds,
+    redevelopmentEligibleObjectIds: eligibleObjectIds,
+    preservedBuildingReasons,
+    redevelopmentEligibleBuildingReasons,
+    largestBuildingAreaSqFt: largestBuildingArea,
+    preservedBuildingAreaSqFt: preservedBuildingArea,
+    redevelopmentEligibleBuildingAreaSqFt: eligibleBuildingArea
+  }
 
   return {
     clippedGeometry: clipped,
-    area,
+    area: totalArea,
+    preservedArea,
+    classification,
     warnings,
     errors,
     buildingsLoaded: buildingFeatures.length,
     duplicatesRemoved,
     validPolygons: validBuildings.length,
     invalidSkipped: skippedCount,
-    clippedCount: 1,
+    clippedCount: clipped ? 1 : 0,
     unionResultType
   }
 }
@@ -1554,6 +1712,7 @@ export function createFailedResult(
     parkingLotFeatureCount: 0,
     drivewayFeatureCount: 0,
     pavementFeatureCount: 0,
-    pavementCoverageAvailable: false
+    pavementCoverageAvailable: false,
+    buildingClassification: undefined
   }
 }
