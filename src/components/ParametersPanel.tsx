@@ -795,15 +795,37 @@ function ParametersPanel({
     const baselineMCPI = normalizeMCPI(submittedParameters.mcpi)
     if (baselineMCPI !== currentMCPI) return
 
+    // Do not clobber a draft restoration with a stale previously-analyzed
+    // snapshot for the same parcel.  When the user explicitly opens a draft,
+    // the draft restoration effect is the authoritative source for the editor
+    // state until the next analysis.
+    if (draftParametersToRestore && draftRestoreMCPI) {
+      const normalizedDraftMCPI = normalizeMCPI(draftRestoreMCPI)
+      if (normalizedDraftMCPI === baselineMCPI) {
+        return
+      }
+    }
+
     const incomingRunId = submittedParameters.analysisRunId ?? -1
     const currentRunId = lastAnalyzedSnapshotRef.current?.analysisRunId ?? -1
     if (incomingRunId >= currentRunId) {
+      const incomingFingerprint = createEditableAnalysisFingerprint(submittedParameters.parameters)
       lastAnalyzedSnapshotRef.current = {
         mcpi: baselineMCPI,
         parameters: submittedParameters.parameters,
-        editableFingerprint: createEditableAnalysisFingerprint(submittedParameters.parameters),
+        editableFingerprint: incomingFingerprint,
         analysisRunId: incomingRunId
       }
+      // Mark this MCPI as initialized so the default-initialization effect
+      // does not later overwrite the canonical analyzed snapshot.
+      loadedDraftMCPIRef.current = baselineMCPI
+      // The editable parameter state MUST be the canonical analyzed snapshot after
+      // a successful analysis. The previous deepEqual guard against the *current*
+      // parameters failed because other effects (default init/reset) queue a
+      // default-override in the same render; the later effect would see the old
+      // parameters value and decide not to overwrite. Always apply the incoming
+      // snapshot for the current MCPI and run so it wins as the final update.
+      setParameters(submittedParameters.parameters)
     }
   }, [submittedParameters, selectedSiteInfo.mcpi])
 
