@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { FileJson, Globe, ArrowLeft, Save, Loader, CheckCircle2, AlertTriangle, ChevronDown } from 'lucide-react'
 import type { ConceptAlternativeResult, ConceptAlternativeMetricSources, ConceptStrategy, ConceptAlternativeMetricSource } from '../types/conceptAlternatives'
-import { ConceptualRoadSkeletonResult, SecondaryRoadNetworkResult, DevelopmentOpportunityBlockResult, SubmittedParameters } from '../types/parameters'
+import { ConceptualRoadSkeletonResult, SecondaryRoadNetworkResult, DevelopmentOpportunityBlockResult, SubmittedParameters, CandidateOpenAreaResult } from '../types/parameters'
 import type { TerrainSuitabilityResult } from '../types/terrain'
 import type { ConceptualDevelopmentProgramResult } from '../services/conceptualDevelopmentProgram'
 import { canonicalUseType, type ConceptualDevelopmentLayoutResult } from '../services/conceptualDevelopmentLayout'
@@ -25,6 +25,7 @@ interface GenerateExportPanelProps {
   parentParcelAreaAcres?: number | null
   selectedParcel?: GeoJSON.Feature<GeoJSON.Geometry> | null
   candidateOpenArea?: GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.FeatureCollection<GeoJSON.Geometry> | null
+  candidateOpenAreaResult?: CandidateOpenAreaResult | null
   existingBuildings?: GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.FeatureCollection<GeoJSON.Geometry> | null
   waterWetlands?: GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.FeatureCollection<GeoJSON.Geometry> | null
   existingPavement?: GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.FeatureCollection<GeoJSON.Geometry> | null
@@ -415,6 +416,7 @@ export default function GenerateExportPanel({
   parentParcelAreaAcres,
   selectedParcel,
   candidateOpenArea,
+  candidateOpenAreaResult,
   existingBuildings,
   waterWetlands,
   existingPavement,
@@ -902,6 +904,44 @@ export default function GenerateExportPanel({
       }
     }) ?? []
 
+    const redevelopmentPayload = (() => {
+      if (submittedParameters?.parameters?.developmentApproach !== 'REDEVELOPMENT') {
+        return null
+      }
+      const bc = candidateOpenAreaResult?.buildingClassification
+      const pc = candidateOpenAreaResult?.pavementClassification
+      const ic = candidateOpenAreaResult?.internalRoadClassification
+      return {
+        developmentApproach: 'REDEVELOPMENT',
+        buildingTreatment: submittedParameters.parameters.redevelopment.buildingTreatment,
+        pavementTreatment: submittedParameters.parameters.redevelopment.pavementTreatment,
+        internalRoadTreatment: submittedParameters.parameters.redevelopment.internalRoadTreatment,
+        buildings: bc ? {
+          totalMappedCount: bc.totalBuildingCount,
+          preservedCount: bc.preservedBuildingCount,
+          redevelopmentEligibleCount: bc.redevelopmentEligibleBuildingCount,
+          totalMappedAreaSqFt: safe(bc.preservedBuildingAreaSqFt + bc.redevelopmentEligibleBuildingAreaSqFt),
+          preservedAreaSqFt: safe(bc.preservedBuildingAreaSqFt),
+          redevelopmentEligibleAreaSqFt: safe(bc.redevelopmentEligibleBuildingAreaSqFt)
+        } : null,
+        pavement: pc ? {
+          totalMappedCount: pc.totalPavementCount,
+          preservedCount: pc.preservedPavementCount,
+          reconfigurationEligibleCount: pc.reconfigurationEligiblePavementCount,
+          totalMappedAreaSqFt: safe(pc.preservedPavementAreaSqFt + pc.reconfigurationEligiblePavementAreaSqFt),
+          preservedAreaSqFt: safe(pc.preservedPavementAreaSqFt),
+          reconfigurationEligibleAreaSqFt: safe(pc.reconfigurationEligiblePavementAreaSqFt)
+        } : null,
+        internalRoads: ic ? {
+          classificationBasis: ic.classificationBasis,
+          protectedExternalRoadCount: ic.protectedExternalRoadCount,
+          reconfigurationEligibleInternalRoadCount: ic.reconfigurationEligibleInternalRoadCount,
+          protectedExternalRoadLengthFt: safe(ic.protectedExternalRoadLengthFt),
+          reconfigurationEligibleInternalRoadLengthFt: safe(ic.reconfigurationEligibleInternalRoadLengthFt)
+        } : null
+      }
+    })()
+
     const payload = {
       project: {
         name: PROJECT_NAME,
@@ -909,7 +949,7 @@ export default function GenerateExportPanel({
         generatedAt,
         conceptualOnly: true,
         developmentApproach: submittedParameters?.parameters?.developmentApproach ?? 'NEW_DEVELOPMENT',
-        redevelopment: submittedParameters?.parameters?.redevelopment ?? null
+        redevelopment: redevelopmentPayload
       },
       parcel: {
         mcpi,
@@ -1193,6 +1233,48 @@ export default function GenerateExportPanel({
               {fmtLabel('Existing pavement treatment', submittedParameters.parameters.redevelopment.pavementTreatment.replace(/_/g, ' '))}
               {fmtLabel('Internal road treatment', submittedParameters.parameters.redevelopment.internalRoadTreatment.replace(/_/g, ' '))}
             </div>
+
+            {candidateOpenAreaResult && (
+              <div className="mt-2 p-2 rounded space-y-2" style={{ background: 'rgba(5, 8, 7, 0.55)' }}>
+                <p className="text-[10px] uppercase text-slate-400 mb-1">Redevelopment Effect</p>
+                <p className="text-[11px] leading-[1.3]" style={{ color: 'var(--text-secondary)' }}>
+                  Redevelopment treatment changes which mapped existing features act as hard constraints. Original mapped features remain visible and exportable.
+                </p>
+
+                {candidateOpenAreaResult.buildingClassification && (
+                  <div className="space-y-0.5">
+                    {fmtLabel('Building treatment applied', candidateOpenAreaResult.buildingClassification.buildingTreatment?.replace(/_/g, ' ') ?? '—')}
+                    {fmtLabel('Buildings preserved', fmtCount(candidateOpenAreaResult.buildingClassification.preservedBuildingCount))}
+                    {fmtLabel('Buildings redevelopment-eligible', fmtCount(candidateOpenAreaResult.buildingClassification.redevelopmentEligibleBuildingCount))}
+                    {fmtLabel('Building area preserved', fmtAc(candidateOpenAreaResult.buildingClassification.preservedBuildingAreaSqFt / SQFT_PER_ACRE))}
+                    {fmtLabel('Building area released', fmtAc(candidateOpenAreaResult.buildingClassification.redevelopmentEligibleBuildingAreaSqFt / SQFT_PER_ACRE))}
+                  </div>
+                )}
+
+                {candidateOpenAreaResult.pavementClassification && (
+                  <div className="space-y-0.5">
+                    {fmtLabel('Pavement treatment applied', candidateOpenAreaResult.pavementClassification.pavementTreatment?.replace(/_/g, ' ') ?? '—')}
+                    {fmtLabel('Pavement preserved', fmtCount(candidateOpenAreaResult.pavementClassification.preservedPavementCount))}
+                    {fmtLabel('Pavement reconfig-eligible', fmtCount(candidateOpenAreaResult.pavementClassification.reconfigurationEligiblePavementCount))}
+                    {fmtLabel('Pavement area preserved', fmtAc(candidateOpenAreaResult.pavementClassification.preservedPavementAreaSqFt / SQFT_PER_ACRE))}
+                    {fmtLabel('Pavement area released', fmtAc(candidateOpenAreaResult.pavementClassification.reconfigurationEligiblePavementAreaSqFt / SQFT_PER_ACRE))}
+                  </div>
+                )}
+
+                {candidateOpenAreaResult.internalRoadClassification && (
+                  <div className="space-y-0.5">
+                    {fmtLabel('Internal road treatment applied', candidateOpenAreaResult.internalRoadClassification.internalRoadTreatment?.replace(/_/g, ' ') ?? '—')}
+                    {fmtLabel('Protected external roads', `${fmtCount(candidateOpenAreaResult.internalRoadClassification.protectedExternalRoadCount)} (${fmtFt(candidateOpenAreaResult.internalRoadClassification.protectedExternalRoadLengthFt)})`)}
+                    {fmtLabel('Reconfig-eligible internal roads', `${fmtCount(candidateOpenAreaResult.internalRoadClassification.reconfigurationEligibleInternalRoadCount)} (${fmtFt(candidateOpenAreaResult.internalRoadClassification.reconfigurationEligibleInternalRoadLengthFt)})`)}
+                    {candidateOpenAreaResult.internalRoadClassification.classificationBasis === 'CONSERVATIVE_NO_RELIABLE_INTERNAL_CLASSIFICATION' && (
+                      <p className="text-[11px] leading-[1.3] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                        Internal road reconfiguration requested, but current GIS data cannot reliably distinguish private/internal circulation from the public road network. External/public access constraints remain protected.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </CollapsibleSection>
         )}
       </CollapsibleSection>

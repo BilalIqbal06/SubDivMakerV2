@@ -1161,8 +1161,26 @@ function ParametersPanel({
 
     const candidateOpenAreaGeometry = candidateOpenArea?.candidateGeometry || null
 
+    const getFeatureObjectId = (f: any): string | undefined => {
+      const id = f?.properties?.OBJECTID ?? f?.properties?.objectid ?? f?.properties?.id
+      return id == null ? undefined : String(id)
+    }
+
+    const buildingClassification = candidateOpenArea?.buildingClassification
+    const preservedBuildingIds = new Set((buildingClassification?.preservedBuildingObjectIds ?? []).map(String))
+    const eligibleBuildingIds = new Set((buildingClassification?.redevelopmentEligibleObjectIds ?? []).map(String))
+
     const existingBuildings = existingConditions?.buildings?.features?.length
-      ? ({ type: 'FeatureCollection', features: existingConditions.buildings.features.filter((f: any) => f && f.geometry).map((f: any) => ({ ...f, properties: f.properties || {} })) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
+      ? ({ type: 'FeatureCollection', features: existingConditions.buildings.features.filter((f: any) => f && f.geometry).map((f: any) => {
+          const id = getFeatureObjectId(f)
+          const extra: Record<string, any> = {}
+          if (buildingClassification?.buildingTreatment) extra.redevelopmentTreatment = buildingClassification.buildingTreatment
+          if (id != null) {
+            if (preservedBuildingIds.has(id)) extra.redevelopmentDisposition = 'PRESERVED'
+            else if (eligibleBuildingIds.has(id)) extra.redevelopmentDisposition = 'REDEVELOPMENT_ELIGIBLE'
+          }
+          return { ...f, properties: { ...(f.properties || {}), ...extra } }
+        }) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
       : null
 
     const hydrology = existingConditions?.hydrology?.features
@@ -1176,9 +1194,22 @@ function ParametersPanel({
       ? ({ type: 'FeatureCollection', features: waterWetlandFeatures.map((f: any) => ({ ...f, properties: f.properties || {} })) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
       : null
 
+    const pavementClassification = candidateOpenArea?.pavementClassification
+    const preservedPavementIds = new Set((pavementClassification?.preservedPavementObjectIds ?? []).map(String))
+    const eligiblePavementIds = new Set((pavementClassification?.reconfigurationEligiblePavementObjectIds ?? []).map(String))
+
     const pavementFeatureArray = existingConditions?.pavement?.features?.features
     const existingPavement = pavementFeatureArray?.length
-      ? ({ type: 'FeatureCollection', features: pavementFeatureArray.filter((f: any) => f && f.geometry).map((f: any) => ({ ...f, properties: f.properties || {} })) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
+      ? ({ type: 'FeatureCollection', features: pavementFeatureArray.filter((f: any) => f && f.geometry).map((f: any) => {
+          const id = getFeatureObjectId(f)
+          const extra: Record<string, any> = {}
+          if (pavementClassification?.pavementTreatment) extra.redevelopmentTreatment = pavementClassification.pavementTreatment
+          if (id != null) {
+            if (preservedPavementIds.has(id)) extra.redevelopmentDisposition = 'PRESERVED'
+            else if (eligiblePavementIds.has(id)) extra.redevelopmentDisposition = 'RECONFIGURATION_ELIGIBLE'
+          }
+          return { ...f, properties: { ...(f.properties || {}), ...extra } }
+        }) } as GeoJSON.FeatureCollection<GeoJSON.Geometry>)
       : null
 
     return {
@@ -1217,6 +1248,7 @@ function ParametersPanel({
           parentParcelAreaAcres={parentParcelAreaAcres}
           selectedParcel={exportContextGeoJSON.selectedParentParcel}
           candidateOpenArea={exportContextGeoJSON.candidateOpenAreaGeometry}
+          candidateOpenAreaResult={candidateOpenArea}
           existingBuildings={exportContextGeoJSON.existingBuildings}
           waterWetlands={exportContextGeoJSON.waterWetlands}
           existingPavement={exportContextGeoJSON.existingPavement}
@@ -1254,12 +1286,14 @@ function ParametersPanel({
 
       {/* Applied Parameters (shows after analysis, hidden while editing) */}
       {submittedParameters && !isEditMode && (
-        <AppliedParametersSection
-          submittedParameters={submittedParameters}
-          candidateOpenArea={candidateOpenArea}
-          parcelFeasibilityAssessment={parcelFeasibilityAssessment}
-          onEdit={() => setIsEditMode(true)}
-        />
+        <div className="flex-1 overflow-y-auto p-4" style={{ scrollbarWidth: 'thin', scrollbarColor: '#40826D #0B211B' }}>
+          <AppliedParametersSection
+            submittedParameters={submittedParameters}
+            candidateOpenArea={candidateOpenArea}
+            parcelFeasibilityAssessment={parcelFeasibilityAssessment}
+            onEdit={() => setIsEditMode(true)}
+          />
+        </div>
       )}
 
       {(!submittedParameters || isEditMode) && (
@@ -2480,6 +2514,10 @@ function AppliedParametersSection({
     n == null || isNaN(n) ? '—' : `${n.toFixed(2)} ac`
   const fmtPct = (n?: number | null) =>
     n == null || isNaN(n) ? '—' : `${(n > 1 ? n : n * 100).toFixed(1)}%`
+  const fmtCount = (n?: number | null) =>
+    n == null || isNaN(n) ? '—' : `${Math.round(n).toLocaleString()}`
+  const fmtFt = (n?: number | null) =>
+    n == null || isNaN(n) ? '—' : `${Math.round(n).toLocaleString()} ft`
 
   const status = candidateOpenArea?.status ?? 'analysis-required'
   const sitePriorities = [
@@ -2491,7 +2529,8 @@ function AppliedParametersSection({
   const [open, setOpen] = useState({
     siteConditions: false,
     devParams: false,
-    advanced: false
+    advanced: false,
+    redevelopmentEffect: false
   })
 
   const toggle = (key: keyof typeof open) => {
@@ -2559,6 +2598,71 @@ function AppliedParametersSection({
           )}
         </div>
       </CollapsibleSection>
+
+      {parameters.developmentApproach === 'REDEVELOPMENT' && (
+        <CollapsibleSection
+          id="post-redevelopment-effect"
+          title="Redevelopment Effect"
+          expanded={open.redevelopmentEffect}
+          onToggle={() => toggle('redevelopmentEffect')}
+        >
+          <p className="text-[10px] leading-[1.3] mb-2" style={{ color: 'var(--text-secondary)' }}>
+            Redevelopment treatment changes which mapped existing features act as hard constraints. Original mapped features remain visible and exportable.
+          </p>
+
+          {candidateOpenArea?.buildingClassification && (
+            <div className="mb-2 p-2 rounded" style={{ background: 'rgba(5, 8, 7, 0.55)' }}>
+              <p className="text-[10px] uppercase text-slate-400 mb-1">Buildings</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-slate-400">Treatment</span><span className="text-white">{candidateOpenArea.buildingClassification.buildingTreatment?.replace(/_/g, ' ') ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Preserved</span><span className="text-white">{fmtCount(candidateOpenArea.buildingClassification.preservedBuildingCount)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Redevelopment-eligible</span><span className="text-white">{fmtCount(candidateOpenArea.buildingClassification.redevelopmentEligibleBuildingCount)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Preserved area</span><span className="text-white">{fmtAc(candidateOpenArea.buildingClassification.preservedBuildingAreaSqFt / 43560)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Eligible area</span><span className="text-white">{fmtAc(candidateOpenArea.buildingClassification.redevelopmentEligibleBuildingAreaSqFt / 43560)}</span></div>
+              </div>
+            </div>
+          )}
+
+          {candidateOpenArea?.pavementClassification && (
+            <div className="mb-2 p-2 rounded" style={{ background: 'rgba(5, 8, 7, 0.55)' }}>
+              <p className="text-[10px] uppercase text-slate-400 mb-1">Pavement</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-slate-400">Treatment</span><span className="text-white">{candidateOpenArea.pavementClassification.pavementTreatment?.replace(/_/g, ' ') ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Preserved</span><span className="text-white">{fmtCount(candidateOpenArea.pavementClassification.preservedPavementCount)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Reconfiguration-eligible</span><span className="text-white">{fmtCount(candidateOpenArea.pavementClassification.reconfigurationEligiblePavementCount)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Preserved area</span><span className="text-white">{fmtAc(candidateOpenArea.pavementClassification.preservedPavementAreaSqFt / 43560)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Eligible area</span><span className="text-white">{fmtAc(candidateOpenArea.pavementClassification.reconfigurationEligiblePavementAreaSqFt / 43560)}</span></div>
+              </div>
+            </div>
+          )}
+
+          {candidateOpenArea?.internalRoadClassification && (
+            <div className="mb-2 p-2 rounded" style={{ background: 'rgba(5, 8, 7, 0.55)' }}>
+              <p className="text-[10px] uppercase text-slate-400 mb-1">Internal Roads / Access</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-slate-400">Treatment</span><span className="text-white">{candidateOpenArea.internalRoadClassification.internalRoadTreatment?.replace(/_/g, ' ') ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Protected external roads</span><span className="text-white">{fmtCount(candidateOpenArea.internalRoadClassification.protectedExternalRoadCount)} ({fmtFt(candidateOpenArea.internalRoadClassification.protectedExternalRoadLengthFt)})</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Reconfiguration-eligible internal roads</span><span className="text-white">{fmtCount(candidateOpenArea.internalRoadClassification.reconfigurationEligibleInternalRoadCount)} ({fmtFt(candidateOpenArea.internalRoadClassification.reconfigurationEligibleInternalRoadLengthFt)})</span></div>
+                {candidateOpenArea.internalRoadClassification.classificationBasis === 'CONSERVATIVE_NO_RELIABLE_INTERNAL_CLASSIFICATION' && (
+                  <p className="text-[10px] leading-[1.3] mt-1" style={{ color: 'var(--text-secondary)' }}>
+                    Internal road reconfiguration requested, but current GIS data cannot reliably distinguish private/internal circulation from the public road network. External/public access constraints remain protected.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {candidateOpenArea?.buildingClassification && candidateOpenArea?.pavementClassification && (
+            <div className="p-2 rounded" style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid #f59e0b' }}>
+              <p className="text-[10px] uppercase text-amber-400 mb-1">Hard constraints relaxed</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between"><span className="text-slate-400">Building area released</span><span className="text-white">{fmtAc(candidateOpenArea.buildingClassification.redevelopmentEligibleBuildingAreaSqFt / 43560)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Pavement area released</span><span className="text-white">{fmtAc(candidateOpenArea.pavementClassification.reconfigurationEligiblePavementAreaSqFt / 43560)}</span></div>
+              </div>
+            </div>
+          )}
+        </CollapsibleSection>
+      )}
 
       <CollapsibleSection
         id="post-advanced"
