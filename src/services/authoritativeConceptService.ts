@@ -1,5 +1,7 @@
-import { startCpuSlice, resetYieldCount, yieldToMainThread } from '../lib/cooperativeScheduler'
+import { startCpuSlice, resetYieldCount, yieldToMainThread, getYieldCount, getYieldWallClockMs } from '../lib/cooperativeScheduler'
 import { recomputeCounter, turfc as turf, safeTurfOp, ENABLE_EXPENSIVE_PERFORMANCE_DIAGNOSTICS } from '../lib/perf'
+import { generateAuthoritativeConceptInWorker } from '../lib/generationWorkerService'
+import type { RoadData } from './gisService'
 import { runTerrainQueryAudit, getTerrainLineQueryAudit, resetTerrainLineQueryCache } from './terrainSuitabilityQuery'
 import type {
   ProjectParameters,
@@ -88,6 +90,93 @@ export interface AuthoritativeConceptInput {
   existingAlternatives: ConceptAlternativeResult[] | null
   targetAlternativeId: ConceptStrategy
   recommendedAlternativeId: ConceptStrategy | null
+  roadPrecedentStreets?: RoadData[]
+}
+
+export async function generateAuthoritativeConcept(
+  input: AuthoritativeConceptInput,
+  signal?: AbortSignal,
+  runId?: number
+): Promise<AuthoritativeConceptResult> {
+  const effectiveRunId = runId ?? Date.now()
+  const transactionId = `${effectiveRunId}-${Math.random().toString(36).slice(2, 11)}`
+  const {
+    mcpi,
+    targetAlternativeId,
+    projectParameters,
+    analysisRunId,
+    parcelGeometry
+  } = input
+
+  const conceptCacheKey = buildConceptCacheKey(mcpi, targetAlternativeId, projectParameters, analysisRunId)
+  const cachedConcept = conceptResultCache.get(conceptCacheKey)
+  if (cachedConcept) {
+    if (import.meta.env.DEV) {
+      console.log('[ConceptAlternativeCacheAudit]', {
+        mcpi,
+        strategy: targetAlternativeId,
+        cacheHit: true,
+        primaryRoadExecutions: 0,
+        secondaryRoadExecutions: 0,
+        localStreetExecutions: 0,
+        townhomeExecutions: 0,
+        conceptCacheKey
+      })
+    }
+    return structuredClone(cachedConcept)
+  }
+
+  let enrichedInput = input
+  if (!input.roadPrecedentStreets) {
+    const roadPrecedentStreets = await fetchRoadPrecedentStreets(mcpi, parcelGeometry, signal)
+    enrichedInput = { ...input, roadPrecedentStreets }
+  }
+
+  const transactionStart = performance.now()
+  const transactionStartTimestamp = new Date().toISOString()
+  const mainThreadVisibilityAtStart = typeof document !== 'undefined' ? document.visibilityState : 'unknown'
+
+  let result: AuthoritativeConceptResult
+  let workerUsed = false
+  let fallbackReason: string | null = null
+
+  if (typeof Worker !== 'undefined') {
+    try {
+      result = await generateAuthoritativeConceptInWorker(enrichedInput, signal, effectiveRunId, transactionId)
+      workerUsed = true
+    } catch (err) {
+      fallbackReason = String(err)
+      result = await runAuthoritativeConceptTransaction(effectiveRunId, enrichedInput, signal)
+      workerUsed = false
+    }
+  } else {
+    fallbackReason = 'Worker not supported'
+    result = await runAuthoritativeConceptTransaction(effectiveRunId, enrichedInput, signal)
+  }
+
+  const transactionFinish = performance.now()
+  const transactionFinishTimestamp = new Date().toISOString()
+  const mainThreadVisibilityAtFinish = typeof document !== 'undefined' ? document.visibilityState : 'unknown'
+
+  if (import.meta.env.DEV) {
+    console.log('[GenerationWorkerAudit]', {
+      transactionId,
+      alternativeId: targetAlternativeId,
+      workerUsed,
+      fallback: fallbackReason != null,
+      fallbackReason,
+      startTime: transactionStartTimestamp,
+      finishTime: transactionFinishTimestamp,
+      totalMs: Math.round(transactionFinish - transactionStart),
+      cancelled: signal?.aborted ?? false,
+      success: !signal?.aborted && result != null,
+      mainThreadVisibilityAtStart,
+      mainThreadVisibilityAtFinish
+    })
+  }
+
+  conceptResultCache.set(conceptCacheKey, result)
+  return structuredClone(result)
 }
 
 export async function runAuthoritativeConceptTransaction(
@@ -137,6 +226,9 @@ export async function runAuthoritativeConceptTransaction(
   resetYieldCount()
   resetTerrainLineQueryCache()
   const transactionStart = performance.now()
+  const transactionStartTimestamp = new Date().toISOString()
+  const visibilityAtStart = typeof document !== 'undefined' ? document.visibilityState : 'unknown'
+
   await yieldToMainThread()
   startCpuSlice()
 
@@ -162,7 +254,7 @@ export async function runAuthoritativeConceptTransaction(
   })
   recordStage('terrainSuitability', tSuitability)
 
-  const roadPrecedentStreets = await fetchRoadPrecedentStreets(mcpi, parcelGeometry, signal)
+  const roadPrecedentStreets = input.roadPrecedentStreets ?? await fetchRoadPrecedentStreets(mcpi, parcelGeometry, signal)
 
   // Primary road skeleton
   const tPrimary = performance.now()
@@ -676,6 +768,8 @@ export async function runAuthoritativeConceptTransaction(
   const largestStagePercent = totalTransactionMs > 0 ? Math.round((largestStage.totalMs / totalTransactionMs) * 1000) / 10 : 0
 
   if (import.meta.env.DEV) {
+    const transactionFinishTimestamp = new Date().toISOString()
+    const visibilityAtFinish = typeof document !== 'undefined' ? document.visibilityState : 'unknown'
     const selectedDevelopmentTypes = projectParameters.developmentProgram?.filter(u => u.enabled).map(u => u.useType) ?? []
     const rankedStages = [...stageTimings]
       .sort((a, b) => b.totalMs - a.totalMs)
@@ -712,7 +806,13 @@ export async function runAuthoritativeConceptTransaction(
     console.log('[AuthoritativeGenerationPerformanceAudit]', {
       mcpi,
       alternativeId: targetAlternativeId,
+      startTime: transactionStartTimestamp,
+      finishTime: transactionFinishTimestamp,
       totalMs: totalTransactionMs,
+      visibilityAtStart,
+      visibilityAtFinish,
+      yieldCount: getYieldCount(),
+      yieldWallClockMs: getYieldWallClockMs(),
       stages: stageTimings,
       slowestStage: largestStage.name,
       slowestStageMs: largestStage.totalMs,
@@ -760,5 +860,5 @@ export async function runAuthoritativeConceptTransaction(
     })
   }
 
-  return bundle
+    return bundle
 }

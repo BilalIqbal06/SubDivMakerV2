@@ -20,7 +20,7 @@ import { ProjectParameters, SelectedSiteInfo, ExistingConditionsData, CandidateO
 import type { ConceptualDevelopmentProgramResult } from './services/conceptualDevelopmentProgram'
 import { ConceptualDevelopmentLayoutResult } from './services/conceptualDevelopmentLayout'
 import type { LocalStreetNetworkResult } from './types/localStreets'
-import { runAuthoritativeConceptTransaction, getCachedAuthoritativeConcept, getConceptCacheKeysForMcpi, type AuthoritativeConceptResult } from './services/authoritativeConceptService'
+import { generateAuthoritativeConcept, getCachedAuthoritativeConcept, getConceptCacheKeysForMcpi, type AuthoritativeConceptResult } from './services/authoritativeConceptService'
 import { calculateParcelFeasibility, getParcelScreeningReadiness, buildParcelScreeningInputSignature } from './services/parcelFeasibilityService'
 import type { ParcelFeasibilityAssessment, TerrainScreeningStatus } from './services/parcelFeasibilityService'
 import { deriveStrategyParameters, scoreAlternative, recommendAlternativeId } from './lib/conceptAlternativesService'
@@ -1203,7 +1203,7 @@ function App() {
     const startingRecommended = recommendedAlternativeId
 
     try {
-      const bundle = await runAuthoritativeConceptTransaction(newRunId, {
+      const bundle = await generateAuthoritativeConcept({
         mcpi: currentMCPI,
         analysisRunId: candidateOpenAreaResult.analysisRunId,
         parcelGeometry: selectedParcel.feature.geometry,
@@ -1216,7 +1216,7 @@ function App() {
         existingAlternatives: startingAlternatives,
         targetAlternativeId: target,
         recommendedAlternativeId: startingRecommended
-      }, controller.signal)
+      }, controller.signal, newRunId)
       commitAuthoritativeConceptResult(bundle, newRunId, controller)
     } catch (error: any) {
       failAuthoritativeConceptResult(newRunId, error, controller)

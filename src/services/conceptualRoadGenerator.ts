@@ -1,6 +1,6 @@
 ﻿import { turfc as turf, VERBOSE_GIS_DIAGNOSTICS, recomputeCounter, turfCounter, turfPerformance, PipCache, setActivePipCache } from '../lib/perf'
 import { fastAlong, fastBearing } from './fastAlong'
-import { yieldIfNeeded } from '../lib/cooperativeScheduler'
+import { yieldIfNeeded, yieldToMainThread } from '../lib/cooperativeScheduler'
 import { PrimaryRoadInstrumentation, getTurfStageTotal, getActivePrimaryRoadInstrumentation } from '../lib/primaryRoadInstrumentation'
 import { ConceptualRoadSkeletonResult, PrimarySpineAdequacy, RoadParameters } from '../types/parameters'
 import type { TerrainData } from '../types/terrain'
@@ -3302,7 +3302,7 @@ export async function generateConceptualRoadSkeleton(
       if (candidate.trace) candidate.trace.routingAttempts++
       if (attempts % 3 === 0) {
         inst.recordAwait()
-        await deepTracker.asyncTimeOperation('cooperativeYield', () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+        await deepTracker.asyncTimeOperation('cooperativeYield', () => yieldToMainThread())
       }
       boundaryAccessPoint = candidate.streetPoint
 
