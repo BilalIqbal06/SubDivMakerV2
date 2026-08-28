@@ -3,7 +3,7 @@ import { MapContainer, GeoJSON, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { fetchCountyBoundary, fetchParcesInBounds, fetchParcelByGeometry, ParcelData } from '../services/gisService'
-import { ConceptualRoadSkeletonResult, SecondaryRoadNetworkResult, DevelopmentOpportunityBlockResult, DevelopmentOpportunityBlock } from '../types/parameters'
+import { ConceptualRoadSkeletonResult, SecondaryRoadNetworkResult, DevelopmentOpportunityBlockResult, DevelopmentOpportunityBlock, CandidateOpenAreaResult } from '../types/parameters'
 import { TerrainData, TerrainSuitabilityResult } from '../types/terrain'
 import type { ConceptualDevelopmentProgramResult } from '../services/conceptualDevelopmentProgram'
 import type { ConceptualDevelopmentLayoutResult } from '../services/conceptualDevelopmentLayout'
@@ -107,6 +107,7 @@ interface MapComponentProps {
     buildings: any[]
     intersectingStreets: any[]
     nearbyStreets: any[]
+    pavement?: any[]
   } | null
   candidateOpenAreaGeometry?: GeoJSON.Feature<GeoJSON.Geometry> | null
   buildingUnionGeometry?: GeoJSON.Feature<GeoJSON.Geometry> | null
@@ -117,6 +118,7 @@ interface MapComponentProps {
   selectedParcelMCPI?: string
   isAnalysisRunning?: boolean
   analysisBundleIsCurrent?: boolean
+  candidateOpenAreaResult?: CandidateOpenAreaResult | null
   conceptualRoadResult?: ConceptualRoadSkeletonResult | null
   secondaryRoadNetworkResult?: SecondaryRoadNetworkResult | null
   localStreetNetworkResult?: LocalStreetNetworkResult | null
@@ -196,7 +198,7 @@ function ParcelClickHandler({ onParcelSelected }: { onParcelSelected: (parcel: P
   ) : null
 }
 
-function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapReady, existingConditions, candidateOpenAreaGeometry, buildingUnionGeometry, roadCorridorGeometry, hydrologyGeometry, pavementGeometry, showGeneralParcelOutlines = true, selectedParcelMCPI = '', isAnalysisRunning = false, analysisBundleIsCurrent = false, conceptualRoadResult = null, secondaryRoadNetworkResult = null, localStreetNetworkResult = null, developmentOpportunityBlockResult = null, terrainData = null, terrainSuitability = null, conceptualProgram = null, conceptualLayout = null, isRoadGenerating = false }: MapComponentProps) {
+function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapReady, existingConditions, candidateOpenAreaGeometry, buildingUnionGeometry, roadCorridorGeometry, hydrologyGeometry, pavementGeometry, candidateOpenAreaResult = null, showGeneralParcelOutlines = true, selectedParcelMCPI = '', isAnalysisRunning = false, analysisBundleIsCurrent = false, conceptualRoadResult = null, secondaryRoadNetworkResult = null, localStreetNetworkResult = null, developmentOpportunityBlockResult = null, terrainData = null, terrainSuitability = null, conceptualProgram = null, conceptualLayout = null, isRoadGenerating = false }: MapComponentProps) {
   const map = useMap()
   const [zoom, setZoom] = useState(map.getZoom())
   const [countyBoundary, setCountyBoundary] = useState<any>(null)
@@ -264,6 +266,40 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
   const toggleTownhomeRows = () => setShowTownhomeRows(prev => !prev)
   const [showTownhomeUnits, setShowTownhomeUnits] = useState(true)
   const toggleTownhomeUnits = () => setShowTownhomeUnits(prev => !prev)
+
+  const buildings = existingConditions?.buildings || []
+  const intersectingStreets = existingConditions?.intersectingStreets || []
+  const nearbyStreets = existingConditions?.nearbyStreets || []
+  const pavement = existingConditions?.pavement || []
+
+  const buildingClassification = candidateOpenAreaResult?.buildingClassification
+  const pavementClassification = candidateOpenAreaResult?.pavementClassification
+  const preservedBuildingIds = useMemo(() => new Set((buildingClassification?.preservedBuildingObjectIds ?? []).map(String)), [buildingClassification])
+  const redevelopmentEligibleBuildingIds = useMemo(() => new Set((buildingClassification?.redevelopmentEligibleObjectIds ?? []).map(String)), [buildingClassification])
+  const preservedPavementIds = useMemo(() => new Set((pavementClassification?.preservedPavementObjectIds ?? []).map(String)), [pavementClassification])
+  const reconfigurationEligiblePavementIds = useMemo(() => new Set((pavementClassification?.reconfigurationEligiblePavementObjectIds ?? []).map(String)), [pavementClassification])
+
+  const getFeatureObjectId = (f?: any): string | undefined => {
+    const p = f?.properties
+    const id = p?.OBJECTID ?? p?.objectid ?? p?.id
+    return id == null ? undefined : String(id)
+  }
+
+  const getBuildingStyle = (f?: any): L.PathOptions => {
+    const id = getFeatureObjectId(f)
+    if (!id || !buildingClassification) return EXISTING_BUILDING_STYLE
+    if (preservedBuildingIds.has(id)) return PRESERVED_BUILDING_STYLE
+    if (redevelopmentEligibleBuildingIds.has(id)) return REDEVELOPMENT_ELIGIBLE_BUILDING_STYLE
+    return EXISTING_BUILDING_STYLE
+  }
+
+  const getPavementStyle = (f?: any): L.PathOptions => {
+    const id = getFeatureObjectId(f)
+    if (!id || !pavementClassification) return PAVEMENT_STYLE
+    if (preservedPavementIds.has(id)) return PRESERVED_PAVEMENT_STYLE
+    if (reconfigurationEligiblePavementIds.has(id)) return RECONFIGURATION_ELIGIBLE_PAVEMENT_STYLE
+    return PAVEMENT_STYLE
+  }
 
   // Lock all map interactions while a road concept is generating
   useEffect(() => {
@@ -471,6 +507,23 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
     fillOpacity: 0.3
   }
 
+  const PRESERVED_BUILDING_STYLE: L.PathOptions = {
+    fillColor: '#475569',
+    color: '#334155',
+    weight: 2,
+    fillOpacity: 0.55,
+    interactive: false
+  }
+
+  const REDEVELOPMENT_ELIGIBLE_BUILDING_STYLE: L.PathOptions = {
+    fillColor: '#7c3aed',
+    color: '#a78bfa',
+    weight: 1,
+    fillOpacity: 0.25,
+    dashArray: '4, 4',
+    interactive: false
+  }
+
   const ROAD_CORRIDOR_STYLE: L.PathOptions = {
     fillColor: '#F59E0B',
     color: '#F59E0B',
@@ -515,6 +568,23 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
     fillOpacity: 0.55,
     color: '#4b5563',
     weight: 1,
+    interactive: false
+  }
+
+  const PRESERVED_PAVEMENT_STYLE: L.PathOptions = {
+    fillColor: '#6b7280',
+    fillOpacity: 0.55,
+    color: '#4b5563',
+    weight: 1,
+    interactive: false
+  }
+
+  const RECONFIGURATION_ELIGIBLE_PAVEMENT_STYLE: L.PathOptions = {
+    fillColor: '#8b5cf6',
+    fillOpacity: 0.30,
+    color: '#c4b5fd',
+    weight: 1,
+    dashArray: '4, 4',
     interactive: false
   }
 
@@ -926,21 +996,22 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
 
     // Add new layers if data exists
     if (existingConditions) {
-      if (existingConditions.buildings && existingConditions.buildings.length > 0) {
+      if (buildings && buildings.length > 0) {
         const buildingsGeoJSON = {
           type: 'FeatureCollection' as const,
-          features: existingConditions.buildings
+          features: buildings
         }
-        existingBuildingsLayerRef.current = L.geoJSON(buildingsGeoJSON, {
-          style: EXISTING_BUILDING_STYLE,
+        const layer = L.geoJSON(buildingsGeoJSON, {
+          style: getBuildingStyle,
           pane: 'buildingsPane'
-        }).addTo(map)
+        })
+        existingBuildingsLayerRef.current = layer
       }
 
-      if (existingConditions.intersectingStreets && existingConditions.intersectingStreets.length > 0) {
+      if (intersectingStreets && intersectingStreets.length > 0) {
         const intersectingStreetsGeoJSON = {
           type: 'FeatureCollection' as const,
-          features: existingConditions.intersectingStreets
+          features: intersectingStreets
         }
         intersectingStreetsLayerRef.current = L.geoJSON(intersectingStreetsGeoJSON, {
           style: INTERSECTING_STREET_STYLE,
@@ -948,10 +1019,10 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
         }).addTo(map)
       }
 
-      if (existingConditions.nearbyStreets && existingConditions.nearbyStreets.length > 0) {
+      if (nearbyStreets && nearbyStreets.length > 0) {
         const nearbyStreetsGeoJSON = {
           type: 'FeatureCollection' as const,
-          features: existingConditions.nearbyStreets
+          features: nearbyStreets
         }
         nearbyStreetsLayerRef.current = L.geoJSON(nearbyStreetsGeoJSON, {
           style: NEARBY_STREET_STYLE,
@@ -972,7 +1043,7 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
         map.removeLayer(nearbyStreetsLayerRef.current)
       }
     }
-  }, [existingConditions, map])
+  }, [map, buildings, intersectingStreets, nearbyStreets, buildingClassification])
 
   // Handle building union overlay (A. Geometry creation lifecycle)
   useEffect(() => {
@@ -1014,6 +1085,22 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
   // Handle building visibility toggle (B. Visibility lifecycle)
   useEffect(() => {
     const layer = buildingUnionLayerRef.current
+    if (!layer || !map) return
+
+    if (showBuildings) {
+      if (!map.hasLayer(layer)) {
+        layer.addTo(map)
+      }
+    } else {
+      if (map.hasLayer(layer)) {
+        map.removeLayer(layer)
+      }
+    }
+  }, [showBuildings, map])
+
+  // Handle existing building visibility toggle (B. Visibility lifecycle)
+  useEffect(() => {
+    const layer = existingBuildingsLayerRef.current
     if (!layer || !map) return
 
     if (showBuildings) {
@@ -1190,12 +1277,17 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
       pavementLayerRef.current = null
     }
 
-    if (!analysisBundleIsCurrent || !pavementGeometry) {
+    const hasRawPavement = pavement && pavement.length > 0
+    if (!analysisBundleIsCurrent || (!hasRawPavement && !pavementGeometry)) {
       return
     }
 
-    const layer = L.geoJSON(pavementGeometry, {
-      style: PAVEMENT_STYLE,
+    const source = hasRawPavement
+      ? ({ type: 'FeatureCollection' as const, features: pavement })
+      : pavementGeometry
+
+    const layer = L.geoJSON(source, {
+      style: getPavementStyle,
       pane: 'pavementPane'
     })
 
@@ -1211,7 +1303,7 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
         pavementLayerRef.current = null
       }
     }
-  }, [map, pavementGeometry, analysisBundleIsCurrent])
+  }, [map, pavement, pavementGeometry, analysisBundleIsCurrent, pavementClassification])
 
   // Handle pavement visibility toggle (B. Visibility lifecycle)
   useEffect(() => {
@@ -2231,11 +2323,17 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
         : CANDIDATE_OPEN_AREA_STYLE
     )
 
-    existingBuildingsLayerRef.current?.setStyle(dim ? dimFill(EXISTING_BUILDING_STYLE, 0.08) : EXISTING_BUILDING_STYLE)
+    existingBuildingsLayerRef.current?.eachLayer((layer: any) => {
+      const base = getBuildingStyle(layer.feature)
+      layer.setStyle(dim ? dimFill(base, 0.08) : base)
+    })
     buildingUnionLayerRef.current?.setStyle(dim ? dimFill(BUILDING_STYLE, 0.10) : BUILDING_STYLE)
     roadCorridorLayerRef.current?.setStyle(dim ? dimFill(ROAD_CORRIDOR_STYLE, 0.10) : ROAD_CORRIDOR_STYLE)
     hydrologyLayerRef.current?.setStyle(dim ? dimFill(HYDROLOGY_STYLE, 0.08) : HYDROLOGY_STYLE)
-    pavementLayerRef.current?.setStyle(dim ? dimFill(PAVEMENT_STYLE, 0.10) : PAVEMENT_STYLE)
+    pavementLayerRef.current?.eachLayer((layer: any) => {
+      const base = getPavementStyle(layer.feature)
+      layer.setStyle(dim ? dimFill(base, 0.10) : base)
+    })
 
     proposedResidualAreaLayerRef.current?.setStyle(
       dim ? dimFill(PROPOSED_RESIDUAL_AREA_STYLE, 0.06) : PROPOSED_RESIDUAL_AREA_STYLE
@@ -2426,6 +2524,8 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
         showTownhomeUnits={showTownhomeUnits}
         onToggleTownhomeRows={toggleTownhomeRows}
         onToggleTownhomeUnits={toggleTownhomeUnits}
+        redevelopmentBuildingClassification={buildingClassification}
+        redevelopmentPavementClassification={pavementClassification}
       />
 
       {/* Parcel Click Handler for point-and-click selection */}
@@ -2434,7 +2534,7 @@ function MapController({ onParcelSelect, selectedParcel, onZoomChange, onMapRead
   )
 }
 
-export default function MapComponent({ onParcelSelect, selectedParcel, onZoomChange, onMapReady, existingConditions, candidateOpenAreaGeometry, buildingUnionGeometry, roadCorridorGeometry, hydrologyGeometry, pavementGeometry, showGeneralParcelOutlines, selectedParcelMCPI, isAnalysisRunning, analysisBundleIsCurrent, conceptualRoadResult, secondaryRoadNetworkResult = null, localStreetNetworkResult = null, developmentOpportunityBlockResult = null, terrainData = null, terrainSuitability = null, conceptualProgram = null, conceptualLayout = null, isRoadGenerating = false }: MapComponentProps) {
+export default function MapComponent({ onParcelSelect, selectedParcel, onZoomChange, onMapReady, existingConditions, candidateOpenAreaGeometry, buildingUnionGeometry, roadCorridorGeometry, hydrologyGeometry, pavementGeometry, candidateOpenAreaResult = null, showGeneralParcelOutlines, selectedParcelMCPI, isAnalysisRunning, analysisBundleIsCurrent, conceptualRoadResult, secondaryRoadNetworkResult = null, localStreetNetworkResult = null, developmentOpportunityBlockResult = null, terrainData = null, terrainSuitability = null, conceptualProgram = null, conceptualLayout = null, isRoadGenerating = false }: MapComponentProps) {
   const [basemap, setBasemap] = useState<BasemapType>('osm')
   const loudounCenter: [number, number] = [39.09, -77.64]
   const loudounBounds: L.LatLngBoundsExpression = [
@@ -2466,6 +2566,7 @@ export default function MapComponent({ onParcelSelect, selectedParcel, onZoomCha
           roadCorridorGeometry={roadCorridorGeometry}
           hydrologyGeometry={hydrologyGeometry}
           pavementGeometry={pavementGeometry}
+          candidateOpenAreaResult={candidateOpenAreaResult}
           showGeneralParcelOutlines={showGeneralParcelOutlines}
           selectedParcelMCPI={selectedParcelMCPI}
           isAnalysisRunning={isAnalysisRunning}

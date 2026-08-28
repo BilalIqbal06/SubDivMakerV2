@@ -71,6 +71,8 @@ interface MapLegendProps {
   showTownhomeUnits?: boolean
   onToggleTownhomeRows?: () => void
   onToggleTownhomeUnits?: () => void
+  redevelopmentBuildingClassification?: { preservedBuildingCount: number; redevelopmentEligibleBuildingCount: number } | null
+  redevelopmentPavementClassification?: { preservedPavementCount: number; reconfigurationEligiblePavementCount: number } | null
 }
 
 export default function MapLegend({
@@ -142,7 +144,9 @@ export default function MapLegend({
   showTownhomeRows = true,
   showTownhomeUnits = true,
   onToggleTownhomeRows,
-  onToggleTownhomeUnits
+  onToggleTownhomeUnits,
+  redevelopmentBuildingClassification = null,
+  redevelopmentPavementClassification = null
 }: MapLegendProps) {
   const attachedLegendNodes = useRef<WeakSet<HTMLDivElement>>(new WeakSet())
 
@@ -219,31 +223,88 @@ export default function MapLegend({
       {hasAnalysisLayers && !isAnalysisRunning && (
         <div className="space-y-2">
           <div className="text-[11px] font-semibold uppercase tracking-wider pt-1" style={{ color: 'var(--text-secondary)' }}>Existing Conditions</div>
-          {/* Locked building footprint */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 border-2" style={{ borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.3)' }}></div>
-              <span style={{ color: 'var(--soft-seafoam)' }}>Locked building footprint</span>
+          {/* Building footprints — generic or redevelopment-aware */}
+          {redevelopmentBuildingClassification ? (
+            <>
+              {redevelopmentBuildingClassification.preservedBuildingCount > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2" style={{ borderColor: '#334155', backgroundColor: 'rgba(71, 85, 105, 0.55)' }}></div>
+                    <span style={{ color: 'var(--soft-seafoam)' }}>Preserved building footprint</span>
+                  </div>
+                  {onToggleBuildings && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (onToggleBuildings) onToggleBuildings()
+                      }}
+                      className="text-xs px-2 py-1 rounded"
+                      style={{
+                        background: showBuildings ? 'var(--seafoam)' : 'transparent',
+                        color: showBuildings ? 'var(--brand-black)' : 'var(--text-secondary)',
+                        border: '1px solid var(--viridian)'
+                      }}
+                    >
+                      {showBuildings ? 'On' : 'Off'}
+                    </button>
+                  )}
+                </div>
+              )}
+              {redevelopmentBuildingClassification.redevelopmentEligibleBuildingCount > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2" style={{ borderColor: '#a78bfa', backgroundColor: 'rgba(124, 58, 237, 0.25)' }}></div>
+                    <span style={{ color: 'var(--soft-seafoam)' }}>Redevelopment-eligible building</span>
+                  </div>
+                  {redevelopmentBuildingClassification.preservedBuildingCount === 0 && onToggleBuildings && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (onToggleBuildings) onToggleBuildings()
+                      }}
+                      className="text-xs px-2 py-1 rounded"
+                      style={{
+                        background: showBuildings ? 'var(--seafoam)' : 'transparent',
+                        color: showBuildings ? 'var(--brand-black)' : 'var(--text-secondary)',
+                        border: '1px solid var(--viridian)'
+                      }}
+                    >
+                      {showBuildings ? 'On' : 'Off'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2" style={{ borderColor: '#64748b', backgroundColor: 'rgba(71, 85, 105, 0.3)' }}></div>
+                <span style={{ color: 'var(--soft-seafoam)' }}>Locked building footprint</span>
+              </div>
+              {onToggleBuildings && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (onToggleBuildings) onToggleBuildings()
+                  }}
+                  className="text-xs px-2 py-1 rounded"
+                  style={{
+                    background: showBuildings ? 'var(--seafoam)' : 'transparent',
+                    color: showBuildings ? 'var(--brand-black)' : 'var(--text-secondary)',
+                    border: '1px solid var(--viridian)'
+                  }}
+                >
+                  {showBuildings ? 'On' : 'Off'}
+                </button>
+              )}
             </div>
-            {onToggleBuildings && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  if (onToggleBuildings) onToggleBuildings()
-                }}
-                className="text-xs px-2 py-1 rounded"
-                style={{ 
-                  background: showBuildings ? 'var(--seafoam)' : 'transparent',
-                  color: showBuildings ? 'var(--brand-black)' : 'var(--text-secondary)',
-                  border: '1px solid var(--viridian)'
-                }}
-              >
-                {showBuildings ? 'On' : 'Off'}
-              </button>
-            )}
-          </div>
+          )}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2" style={{ borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.15)' }}></div>
@@ -316,30 +377,88 @@ export default function MapLegend({
               </button>
             )}
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 border-2" style={{ borderColor: '#9ca3af', backgroundColor: 'rgba(156, 163, 175, 0.45)' }}></div>
-              <span style={{ color: 'var(--soft-seafoam)' }}>Existing pavement</span>
+          {/* Pavement — generic or redevelopment-aware */}
+          {redevelopmentPavementClassification ? (
+            <>
+              {redevelopmentPavementClassification.preservedPavementCount > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2" style={{ borderColor: '#4b5563', backgroundColor: 'rgba(107, 114, 128, 0.55)' }}></div>
+                    <span style={{ color: 'var(--soft-seafoam)' }}>Preserved pavement</span>
+                  </div>
+                  {onTogglePavement && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (onTogglePavement) onTogglePavement()
+                      }}
+                      className="text-xs px-2 py-1 rounded"
+                      style={{
+                        background: showPavement ? 'var(--seafoam)' : 'transparent',
+                        color: showPavement ? 'var(--brand-black)' : 'var(--text-secondary)',
+                        border: '1px solid var(--viridian)'
+                      }}
+                    >
+                      {showPavement ? 'On' : 'Off'}
+                    </button>
+                  )}
+                </div>
+              )}
+              {redevelopmentPavementClassification.reconfigurationEligiblePavementCount > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2" style={{ borderColor: '#c4b5fd', backgroundColor: 'rgba(139, 92, 246, 0.30)' }}></div>
+                    <span style={{ color: 'var(--soft-seafoam)' }}>Reconfiguration-eligible pavement</span>
+                  </div>
+                  {redevelopmentPavementClassification.preservedPavementCount === 0 && onTogglePavement && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (onTogglePavement) onTogglePavement()
+                      }}
+                      className="text-xs px-2 py-1 rounded"
+                      style={{
+                        background: showPavement ? 'var(--seafoam)' : 'transparent',
+                        color: showPavement ? 'var(--brand-black)' : 'var(--text-secondary)',
+                        border: '1px solid var(--viridian)'
+                      }}
+                    >
+                      {showPavement ? 'On' : 'Off'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2" style={{ borderColor: '#9ca3af', backgroundColor: 'rgba(156, 163, 175, 0.45)' }}></div>
+                <span style={{ color: 'var(--soft-seafoam)' }}>Existing pavement</span>
+              </div>
+              {onTogglePavement && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (onTogglePavement) onTogglePavement()
+                  }}
+                  className="text-xs px-2 py-1 rounded"
+                  style={{
+                    background: showPavement ? 'var(--seafoam)' : 'transparent',
+                    color: showPavement ? 'var(--brand-black)' : 'var(--text-secondary)',
+                    border: '1px solid var(--viridian)'
+                  }}
+                >
+                  {showPavement ? 'On' : 'Off'}
+                </button>
+              )}
             </div>
-            {onTogglePavement && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  if (onTogglePavement) onTogglePavement()
-                }}
-                className="text-xs px-2 py-1 rounded"
-                style={{ 
-                  background: showPavement ? 'var(--seafoam)' : 'transparent',
-                  color: showPavement ? 'var(--brand-black)' : 'var(--text-secondary)',
-                  border: '1px solid var(--viridian)'
-                }}
-              >
-                {showPavement ? 'On' : 'Off'}
-              </button>
-            )}
-          </div>
+          )}
           {hasTerrainLayers && (
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">

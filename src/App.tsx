@@ -2152,13 +2152,15 @@ function App() {
               existingConditions={existingConditions ? {
                 buildings: existingConditions.buildings.features,
                 intersectingStreets: existingConditions.intersectingStreets.features,
-                nearbyStreets: existingConditions.nearbyStreets.features
+                nearbyStreets: existingConditions.nearbyStreets.features,
+                pavement: existingConditions.pavement.features
               } : null}
               candidateOpenAreaGeometry={candidateOpenAreaResult?.candidateGeometry || null}
               buildingUnionGeometry={candidateOpenAreaResult?.buildingUnionGeometry || null}
               roadCorridorGeometry={candidateOpenAreaResult?.roadCorridorGeometry || null}
               hydrologyGeometry={candidateOpenAreaResult?.hydrologyGeometry || null}
               pavementGeometry={candidateOpenAreaResult?.pavementGeometry || null}
+              candidateOpenAreaResult={candidateOpenAreaResult}
               showGeneralParcelOutlines={currentStep === 'explore'}
               selectedParcelMCPI={selectedParcel?.feature.properties?.PA_MCPI || ''}
               isAnalysisRunning={isAnalysisRunning}
