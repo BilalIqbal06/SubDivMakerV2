@@ -489,6 +489,7 @@ export async function calculateCandidateOpenArea(
     buildingClassification: buildingResult.classification ?? undefined,
     candidateGeometry: candidateResult.geometry || undefined,
     buildingUnionGeometry: buildingResult.clippedGeometry || undefined,
+    eligibleBuildingGeometry: buildingResult.eligibleGeometry || undefined,
     roadCorridorGeometry: roadResult.clippedGeometry || undefined,
     hydrologyGeometry: hydrologyResult.clippedGeometry || undefined,
     hydrologyConstraintResult: hydrologyResult.constraintResult,
@@ -501,6 +502,7 @@ export async function calculateCandidateOpenArea(
     pavementClassification: pavementResult.classification ?? undefined,
     internalRoadClassification: internalRoadResult,
     pavementGeometry: pavementResult.clippedGeometry || undefined,
+    eligiblePavementGeometry: pavementResult.eligibleGeometry || undefined,
     pavementAreaSqFt: pavementResult.area,
     pavementAreaAcres: pavementResult.area / 43560,
     parkingLotFeatureCount: pavementResult.parkingLotFeatureCount,
@@ -528,6 +530,7 @@ function logHydrologySummary(hydrologyResult: ProcessedHydrology, mcpi: string) 
 
 interface ProcessedBuildings {
   clippedGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null
+  eligibleGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null
   area: number
   preservedArea: number
   classification: BuildingClassificationResult | null
@@ -649,6 +652,7 @@ function processBuildingFootprints(
     }
     return {
       clippedGeometry: null,
+      eligibleGeometry: null,
       area: 0,
       preservedArea: 0,
       classification: null,
@@ -737,6 +741,7 @@ function processBuildingFootprints(
     errors.push(`Building union failed: ${allUnionResult.error}`)
     return {
       clippedGeometry: null,
+      eligibleGeometry: null,
       area: 0,
       preservedArea: 0,
       classification: null,
@@ -758,6 +763,7 @@ function processBuildingFootprints(
     errors.push(`Building clipping failed: ${allIntersectResult.error}`)
     return {
       clippedGeometry: null,
+      eligibleGeometry: null,
       area: 0,
       preservedArea: 0,
       classification: null,
@@ -794,6 +800,18 @@ function processBuildingFootprints(
     }
   }
 
+  // Build redevelopment-eligible building geometry for later opportunity scoring.
+  let eligibleClipped: GeoJSON.Feature<GeoJSON.Geometry> | null = null
+  if (eligibleFeatures.length > 0) {
+    const eligibleUnionResult = unionPolygonFeatures(eligibleFeatures)
+    if (eligibleUnionResult.success && eligibleUnionResult.result) {
+      const eligibleIntersectResult = intersectPolygonFeatures(eligibleUnionResult.result, parcelFeature)
+      if (eligibleIntersectResult.success && eligibleIntersectResult.result) {
+        eligibleClipped = eligibleIntersectResult.result
+      }
+    }
+  }
+
   const preservedBuildingArea = preservedFeatures.reduce((sum, _, i) => {
     const idx = validBuildings.indexOf(preservedFeatures[i])
     return sum + (idx >= 0 ? buildingAreas[idx] : 0)
@@ -819,6 +837,7 @@ function processBuildingFootprints(
 
   return {
     clippedGeometry: clipped,
+    eligibleGeometry: eligibleClipped,
     area: totalArea,
     preservedArea,
     classification,
@@ -1376,6 +1395,7 @@ function logHydrologyClassificationAudit(mcpi: string, result: HydrologyConstrai
 
 interface ProcessedPavement {
   clippedGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null
+  eligibleGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null
   area: number
   preservedArea: number
   classification: PavementClassificationResult | null
@@ -1466,6 +1486,7 @@ function processPavementSurfaces(
   const errors: string[] = []
   const empty: ProcessedPavement = {
     clippedGeometry: null,
+    eligibleGeometry: null,
     area: 0,
     preservedArea: 0,
     classification: null,
@@ -1607,6 +1628,18 @@ function processPavementSurfaces(
     }
   }
 
+  // Build reconfiguration-eligible pavement geometry for later opportunity scoring.
+  let eligibleClipped: GeoJSON.Feature<GeoJSON.Geometry> | null = null
+  if (eligibleFeatures.length > 0) {
+    const eligibleUnionResult = unionPolygonFeatures(eligibleFeatures)
+    if (eligibleUnionResult.success && eligibleUnionResult.result) {
+      const eligibleIntersectResult = intersectPolygonFeatures(eligibleUnionResult.result, parcelFeature)
+      if (eligibleIntersectResult.success && eligibleIntersectResult.result) {
+        eligibleClipped = eligibleIntersectResult.result
+      }
+    }
+  }
+
   const preservedPavementArea = preservedFeatures.reduce((sum, _, i) => {
     const idx = validPavements.indexOf(preservedFeatures[i])
     return sum + (idx >= 0 ? pavementAreas[idx] : 0)
@@ -1641,6 +1674,7 @@ function processPavementSurfaces(
 
   return {
     clippedGeometry: clipped,
+    eligibleGeometry: eligibleClipped,
     area: totalArea,
     preservedArea,
     classification,

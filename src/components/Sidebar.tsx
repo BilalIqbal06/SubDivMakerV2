@@ -8,6 +8,7 @@ import type { ConceptualDevelopmentLayoutResult } from '../services/conceptualDe
 import type { ParcelFeasibilityAssessment } from '../services/parcelFeasibilityService'
 import type { TerrainSuitabilityResult } from '../types/terrain'
 import type { ConceptAlternativeResult, ConceptStrategy } from '../types/conceptAlternatives'
+import type { RedevelopmentImpactMetrics } from '../lib/redevelopmentContext'
 import GenerateExportPanel from './GenerateExportPanel'
 import ParcelFeasibilityCard from './ParcelFeasibilityCard'
 
@@ -32,6 +33,7 @@ interface SidebarProps {
   roadGenerationError?: string | null
   conceptualProgram?: ConceptualDevelopmentProgramResult | null
   conceptualLayout?: ConceptualDevelopmentLayoutResult | null
+  redevelopmentImpact?: RedevelopmentImpactMetrics | null
   terrainSuitability?: TerrainSuitabilityResult | null
   parcelFeasibilityAssessment?: ParcelFeasibilityAssessment | null
   parentParcelAreaAcres?: number | null
@@ -56,6 +58,7 @@ export default function Sidebar({
   roadGenerationError,
   conceptualProgram = null,
   conceptualLayout = null,
+  redevelopmentImpact = null,
   terrainSuitability = null,
   parcelFeasibilityAssessment = null,
   parentParcelAreaAcres = null,
@@ -329,6 +332,7 @@ export default function Sidebar({
               roadGenerationError={roadGenerationError ?? null}
               conceptualProgram={conceptualProgram}
               conceptualLayout={conceptualLayout}
+              redevelopmentImpact={redevelopmentImpact}
               terrainSuitability={terrainSuitability}
               parentParcelAreaAcres={parentParcelAreaAcres}
               conceptAlternatives={conceptAlternatives}

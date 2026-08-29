@@ -1,6 +1,13 @@
 import { startCpuSlice, resetYieldCount, yieldToMainThread, getYieldCount, getYieldWallClockMs } from '../lib/cooperativeScheduler'
 import { recomputeCounter, turfc as turf, safeTurfOp, ENABLE_EXPENSIVE_PERFORMANCE_DIAGNOSTICS } from '../lib/perf'
 import { generateAuthoritativeConceptInWorker } from '../lib/generationWorkerService'
+import {
+  setActiveRedevelopmentContext,
+  getActiveRedevelopmentContext,
+  createRedevelopmentOpportunityContext,
+  computeRedevelopmentImpactMetrics,
+} from '../lib/redevelopmentContext'
+import type { RedevelopmentImpactMetrics } from '../lib/redevelopmentContext'
 import type { RoadData } from './gisService'
 import { runTerrainQueryAudit, getTerrainLineQueryAudit, resetTerrainLineQueryCache } from './terrainSuitabilityQuery'
 import type {
@@ -75,6 +82,7 @@ export interface AuthoritativeConceptResult {
   selectedAlternativeId: ConceptStrategy
   authoritativeAlternativeId: ConceptStrategy
   terrainSuitability: TerrainSuitabilityResult | null
+  redevelopmentImpact?: RedevelopmentImpactMetrics
 }
 
 export interface AuthoritativeConceptInput {
@@ -202,6 +210,11 @@ export async function runAuthoritativeConceptTransaction(
   // cannot mutate the authoritative snapshot used by this run.
   const projectParameters = JSON.parse(JSON.stringify(input.projectParameters)) as ProjectParameters
 
+  // Set up the redevelopment opportunity model for all downstream scorers.
+  const redevelopmentContext = createRedevelopmentOpportunityContext(input)
+  setActiveRedevelopmentContext(redevelopmentContext)
+
+  try {
   const conceptCacheKey = buildConceptCacheKey(mcpi, targetAlternativeId, projectParameters, analysisRunId)
   const cachedConcept = conceptResultCache.get(conceptCacheKey)
   if (cachedConcept) {
@@ -860,5 +873,11 @@ export async function runAuthoritativeConceptTransaction(
     })
   }
 
-    return bundle
+  // Compute redevelopment impact for the final selected concept.
+  bundle.redevelopmentImpact = computeRedevelopmentImpactMetrics(bundle, getActiveRedevelopmentContext())
+
+  return bundle
+  } finally {
+    setActiveRedevelopmentContext(null)
+  }
 }

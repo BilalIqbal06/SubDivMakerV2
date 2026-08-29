@@ -21,6 +21,7 @@ import type { ConceptualDevelopmentProgramResult } from './services/conceptualDe
 import { ConceptualDevelopmentLayoutResult } from './services/conceptualDevelopmentLayout'
 import type { LocalStreetNetworkResult } from './types/localStreets'
 import { generateAuthoritativeConcept, getCachedAuthoritativeConcept, getConceptCacheKeysForMcpi, type AuthoritativeConceptResult } from './services/authoritativeConceptService'
+import type { RedevelopmentImpactMetrics } from './lib/redevelopmentContext'
 import { calculateParcelFeasibility, getParcelScreeningReadiness, buildParcelScreeningInputSignature } from './services/parcelFeasibilityService'
 import type { ParcelFeasibilityAssessment, TerrainScreeningStatus } from './services/parcelFeasibilityService'
 import { deriveStrategyParameters, scoreAlternative, recommendAlternativeId } from './lib/conceptAlternativesService'
@@ -53,6 +54,7 @@ function App() {
   const [secondaryRoadNetworkResult, setSecondaryRoadNetworkResult] = useState<SecondaryRoadNetworkResult | null>(null)
   const [developmentOpportunityBlockResult, setDevelopmentOpportunityBlockResult] = useState<DevelopmentOpportunityBlockResult | null>(null)
   const [conceptualProgram, setConceptualProgram] = useState<ConceptualDevelopmentProgramResult | null>(null)
+  const [redevelopmentImpact, setRedevelopmentImpact] = useState<RedevelopmentImpactMetrics | null>(null)
   const [terrainData, setTerrainData] = useState<TerrainData | null>(null)
   const [isRoadGenerating, setIsRoadGenerating] = useState(false)
   const [roadGenerationError, setRoadGenerationError] = useState<string | null>(null)
@@ -125,6 +127,7 @@ function App() {
     setSecondaryRoadNetworkResult(null)
     setDevelopmentOpportunityBlockResult(null)
     setConceptualProgram(null)
+    setRedevelopmentImpact(null)
     setIsAnalysisRunning(false)
   }, [])
 
@@ -280,6 +283,7 @@ function App() {
     setSecondaryRoadNetworkResult(null)
     setDevelopmentOpportunityBlockResult(null)
     setConceptualProgram(null)
+    setRedevelopmentImpact(null)
     setLocalStreetExpansion(null)
     setTownhomeGenerationResult(null)
     setRoadGenerationError(null)
@@ -1083,6 +1087,7 @@ function App() {
     setSecondaryRoadNetworkResult(bundle.secondaryRoadNetworkResult)
     setDevelopmentOpportunityBlockResult(bundle.developmentOpportunityBlockResult)
     setConceptualProgram(bundle.conceptualProgram)
+    setRedevelopmentImpact(bundle.redevelopmentImpact ?? null)
     setLocalStreetExpansion({ localStreetNetworkResult: bundle.localStreetNetworkResult, finalLayout: bundle.selectedFinalLayout })
     setTownhomeGenerationResult(bundle.townhomeGenerationResult)
     setTerrainSuitability(bundle.terrainSuitability)
@@ -2103,6 +2108,7 @@ function App() {
               roadGenerationError={roadGenerationError}
               conceptualProgram={conceptualProgram}
               conceptualLayout={conceptualLayout}
+              redevelopmentImpact={redevelopmentImpact}
               localStreetNetworkResult={localStreetNetworkResult}
               terrainSuitability={terrainSuitability}
               conceptAlternatives={conceptAlternatives}
@@ -2128,6 +2134,7 @@ function App() {
             roadGenerationError={roadGenerationError}
             conceptualProgram={conceptualProgram}
             conceptualLayout={conceptualLayout}
+            redevelopmentImpact={redevelopmentImpact}
             terrainSuitability={terrainSuitability}
             parcelFeasibilityAssessment={parcelFeasibilityAssessment}
             parentParcelAreaAcres={parcelAreaAcres}

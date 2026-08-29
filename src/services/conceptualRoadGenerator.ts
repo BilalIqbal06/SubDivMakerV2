@@ -1,4 +1,5 @@
 ﻿import { turfc as turf, VERBOSE_GIS_DIAGNOSTICS, recomputeCounter, turfCounter, turfPerformance, PipCache, setActivePipCache } from '../lib/perf'
+import { computeRedevelopmentDisturbance } from '../lib/redevelopmentContext'
 import { fastAlong, fastBearing } from './fastAlong'
 import { yieldIfNeeded, yieldToMainThread } from '../lib/cooperativeScheduler'
 import { PrimaryRoadInstrumentation, getTurfStageTotal, getActivePrimaryRoadInstrumentation } from '../lib/primaryRoadInstrumentation'
@@ -715,6 +716,7 @@ interface RoadDesignScore {
   parallelPenalty: number
   boundaryPenalty: number
   obstaclePenalty: number
+  redevelopmentPenalty: number
   usableAreaServiceScore: number
   edgePocketPenalty: number
   smoothnessPenalty: number
@@ -1316,6 +1318,19 @@ function computeRoadDesignScore(
   if (servedDevelopableAreaSqFt < 5000) edgePocketPenalty += (5000 - servedDevelopableAreaSqFt) * 0.03
   if (achievedPenetrationMeters < 20) edgePocketPenalty += (20 - achievedPenetrationMeters) * 50
 
+  // Redevelopment opportunity/disturbance scoring.
+  const ROAD_FOOTPRINT_BUFFER_METERS = 6
+  const roadFootprint = safeTurfOp(
+    () => (turf.buffer as any)(roadLine as any, ROAD_FOOTPRINT_BUFFER_METERS, { units: 'meters' }) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null,
+    null
+  )
+  const rd = computeRedevelopmentDisturbance(roadFootprint, {
+    servedDevelopableAreaSqFt,
+    isDirectAccess: connectionMethod.startsWith('public'),
+    unlocksAdditionalAcreage: servedDevelopableAreaSqFt > 10000
+  })
+  const redevelopmentPenalty = rd.totalPenalty
+
   const sourceComponentAreaSqFt = squareMetersToSquareFeet(sourceComponentAreaSqM)
   const componentServiceRatio = sourceComponentAreaSqFt > 0 ? servedDevelopableAreaSqFt / sourceComponentAreaSqFt : 0
   const penetrationRatio = availablePenetrationMeters > 0 ? achievedPenetrationMeters / availablePenetrationMeters : 0
@@ -1349,7 +1364,8 @@ function computeRoadDesignScore(
     boundaryPenalty +
     obstaclePenalty +
     edgePocketPenalty +
-    smoothnessPenalty -
+    smoothnessPenalty +
+    redevelopmentPenalty -
     usableAreaServiceScore
 
   // Phase 7B.3A: add terrain-suitability influence (~20% of the non-terrain score).
@@ -1365,6 +1381,7 @@ function computeRoadDesignScore(
     parallelPenalty,
     boundaryPenalty,
     obstaclePenalty,
+    redevelopmentPenalty,
     usableAreaServiceScore,
     edgePocketPenalty,
     smoothnessPenalty,

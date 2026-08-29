@@ -1,4 +1,5 @@
 import { turfc as turf, VERBOSE_GIS_DIAGNOSTICS, ENABLE_EXPENSIVE_PERFORMANCE_DIAGNOSTICS, recomputeCounter, generationPerformance, turfCounter, workflowCriticalPath, workflowTimeline } from '../lib/perf'
+import { computeRedevelopmentDisturbance } from '../lib/redevelopmentContext'
 import { fastRhumbDestination } from './fastAlong'
 import { yieldIfNeeded } from '../lib/cooperativeScheduler'
 import type { ProjectParameters, ConceptualRoadSkeletonResult, SecondaryRoadNetworkResult, DevelopmentOpportunityBlockResult } from '../types/parameters'
@@ -1570,7 +1571,13 @@ export async function generateLocalDevelopmentStreetExpansion(
         // Phase 7B.3C: soft terrain penalty applied to the frontage-per-foot efficiency score.
         const existingScore = marginal.newTrueFrontageFt / Math.max(1, lengthFt)
         const terrainPenalty = existingScore * (1 - (street.terrainRoadScore ?? 1)) * LOCAL_STREET_TERRAIN_INFLUENCE_PCT
-        const finalScore = Math.max(0, existingScore - terrainPenalty - localGrammarPenalty)
+        const rd = computeRedevelopmentDisturbance(street.rightOfWayGeometry, {
+          servedDevelopableAreaSqFt: (marginal.newlyUsedProgrammableAcres ?? 0) * 43560,
+          isDirectAccess: false,
+          unlocksAdditionalAcreage: (marginal.newlyUsedProgrammableAcres ?? 0) > 0
+        })
+        const redevelopmentPenalty = rd.totalPenalty * 0.0001
+        const finalScore = Math.max(0, existingScore - terrainPenalty - localGrammarPenalty - redevelopmentPenalty)
 
         candidateStreets.push({
           id: localId,

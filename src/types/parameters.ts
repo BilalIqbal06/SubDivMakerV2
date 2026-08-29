@@ -390,6 +390,7 @@ export interface CandidateOpenAreaResult {
   buildingClassification?: BuildingClassificationResult
   candidateGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   buildingUnionGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
+  eligibleBuildingGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   roadCorridorGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   hydrologyGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   hydrologyAreaSqFt: number
@@ -401,6 +402,7 @@ export interface CandidateOpenAreaResult {
   pavementClassification?: PavementClassificationResult
   internalRoadClassification?: InternalRoadTreatmentResult
   pavementGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
+  eligiblePavementGeometry?: GeoJSON.Feature<GeoJSON.Geometry>
   pavementAreaSqFt: number
   pavementAreaAcres: number
   parkingLotFeatureCount: number

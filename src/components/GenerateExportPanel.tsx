@@ -8,6 +8,7 @@ import { canonicalUseType, type ConceptualDevelopmentLayoutResult } from '../ser
 import { getRecommendationScore } from '../lib/conceptAlternativesService'
 import type { LocalStreetNetworkResult } from '../types/localStreets'
 import type { ParcelFeasibilityAssessment } from '../services/parcelFeasibilityService'
+import type { RedevelopmentImpactMetrics } from '../lib/redevelopmentContext'
 
 interface GenerateExportPanelProps {
   canGenerate: boolean
@@ -20,6 +21,7 @@ interface GenerateExportPanelProps {
   developmentOpportunityBlockResult?: DevelopmentOpportunityBlockResult | null
   conceptualProgram?: ConceptualDevelopmentProgramResult | null
   conceptualLayout?: ConceptualDevelopmentLayoutResult | null
+  redevelopmentImpact?: RedevelopmentImpactMetrics | null
   localStreetNetworkResult?: LocalStreetNetworkResult | null
   // Optional GeoJSON / parent parcel sources (passed from App.tsx if available)
   parentParcelAreaAcres?: number | null
@@ -412,6 +414,7 @@ export default function GenerateExportPanel({
   developmentOpportunityBlockResult,
   conceptualProgram,
   conceptualLayout,
+  redevelopmentImpact,
   localStreetNetworkResult,
   parentParcelAreaAcres,
   selectedParcel,
@@ -1042,7 +1045,15 @@ export default function GenerateExportPanel({
         townhomeUnitCount: townhomeUnits,
         conceptualUnitCount: safe(selectedAlternative?.metrics.conceptualUnits ?? null),
         layoutAreaAcres: safe(layoutArea),
-        remainingOpportunityAcres: safe(selectedAlternative?.metrics.remainingOpportunityAcres ?? null)
+        remainingOpportunityAcres: safe(selectedAlternative?.metrics.remainingOpportunityAcres ?? null),
+        redevelopmentImpact: submittedParameters?.parameters?.developmentApproach === 'REDEVELOPMENT' && redevelopmentImpact ? {
+          impactLevel: redevelopmentImpact.redevelopmentImpactLevel,
+          eligibleBuildingAreaImpactedSqFt: safe(redevelopmentImpact.eligibleBuildingAreaImpactedSqFt),
+          eligiblePavementAreaImpactedSqFt: safe(redevelopmentImpact.eligiblePavementAreaImpactedSqFt),
+          estimatedBuildingFootprintImpacted: redevelopmentImpact.estimatedBuildingFootprintImpacted,
+          estimatedPavementFootprintImpacted: redevelopmentImpact.estimatedPavementFootprintImpacted,
+          notes: 'Conceptual estimate of disturbance to mapped redevelopment-eligible features under the selected site treatment.'
+        } : null
       },
       comparison: {
         recommendedStrategy: recommendedAlternativeId,
@@ -1200,6 +1211,16 @@ export default function GenerateExportPanel({
     })
 
     const collection: any = { type: 'FeatureCollection', features, coordinateReferenceSystem: 'EPSG:4326' }
+    if (developmentApproach === 'REDEVELOPMENT' && redevelopmentImpact) {
+      collection.redevelopment = {
+        impactLevel: redevelopmentImpact.redevelopmentImpactLevel,
+        eligibleBuildingAreaImpactedSqFt: redevelopmentImpact.eligibleBuildingAreaImpactedSqFt,
+        eligiblePavementAreaImpactedSqFt: redevelopmentImpact.eligiblePavementAreaImpactedSqFt,
+        estimatedBuildingFootprintImpacted: redevelopmentImpact.estimatedBuildingFootprintImpacted,
+        estimatedPavementFootprintImpacted: redevelopmentImpact.estimatedPavementFootprintImpacted,
+        notes: 'Collection-level conceptual estimate of disturbance to mapped redevelopment-eligible features.'
+      }
+    }
     downloadJSON(collection, `${fileBase}_Concept.geojson`)
   }
 
@@ -1712,6 +1733,37 @@ export default function GenerateExportPanel({
               )}
               {fmtLabel('Approx. acreage used by layout', fmtAc(layoutArea))}
               {fmtLabel('Remaining opportunity acreage', fmtMetricValue(remainingOpportunity, remainingOpportunitySource, 'ac'))}
+
+              {submittedParameters?.parameters?.developmentApproach === 'REDEVELOPMENT' && redevelopmentImpact && (
+                <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--card-border)' }}>
+                  <h5 className="text-[13px] font-bold mb-2" style={{ color: '#ffffff' }}>Redevelopment Impact</h5>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>Impact level</span>
+                      <span
+                        className="text-[13px] font-semibold"
+                        style={{
+                          color:
+                            redevelopmentImpact.redevelopmentImpactLevel === 'LOW'
+                              ? 'var(--soft-seafoam)'
+                              : redevelopmentImpact.redevelopmentImpactLevel === 'MODERATE'
+                                ? '#fbbf24'
+                                : '#f87171'
+                        }}
+                      >
+                        {redevelopmentImpact.redevelopmentImpactLevel}
+                      </span>
+                    </div>
+                    {fmtLabel('Eligible building area affected', fmtAc(redevelopmentImpact.eligibleBuildingAreaImpactedSqFt / SQFT_PER_ACRE) + ` (${Math.round(redevelopmentImpact.eligibleBuildingAreaImpactedSqFt).toLocaleString()} sq ft)`)}
+                    {fmtLabel('Eligible pavement affected', fmtAc(redevelopmentImpact.eligiblePavementAreaImpactedSqFt / SQFT_PER_ACRE) + ` (${Math.round(redevelopmentImpact.eligiblePavementAreaImpactedSqFt).toLocaleString()} sq ft)`)}
+                    {fmtLabel('Building footprints affected', redevelopmentImpact.estimatedBuildingFootprintImpacted ? 'Yes' : 'No')}
+                    {fmtLabel('Pavement footprints affected', redevelopmentImpact.estimatedPavementFootprintImpacted ? 'Yes' : 'No')}
+                  </div>
+                  <p className="text-[10px] leading-[1.4] mt-2" style={{ color: 'var(--text-secondary)' }}>
+                    Estimated disturbance to mapped features classified as redevelopment-eligible under the selected site treatment.
+                  </p>
+                </div>
+              )}
             </div>
             {(!selectedLayout || selectedLayout?.status !== 'generated') && (
               <p className="text-[11px] leading-[1.4] mt-3" style={{ color: 'var(--text-secondary)' }}>

@@ -27,6 +27,7 @@ import { deriveRecommendedParameters, getSimplifiedFromProjectParameters, applyS
 import GenerateExportPanel from './GenerateExportPanel'
 import { calculateCandidateOpenArea, createFailedResult } from '../services/candidateOpenAreaService'
 import type { ConceptAlternativeResult, ConceptStrategy } from '../types/conceptAlternatives'
+import type { RedevelopmentImpactMetrics } from '../lib/redevelopmentContext'
 import ThemedSelect from './ThemedSelect'
 import { flushSync } from 'react-dom'
 
@@ -279,6 +280,7 @@ interface ParametersPanelProps {
   developmentOpportunityBlockResult?: DevelopmentOpportunityBlockResult | null
   conceptualProgram?: ConceptualDevelopmentProgramResult | null
   conceptualLayout?: ConceptualDevelopmentLayoutResult | null
+  redevelopmentImpact?: RedevelopmentImpactMetrics | null
   localStreetNetworkResult?: LocalStreetNetworkResult | null
   terrainSuitability?: TerrainSuitabilityResult | null
   conceptAlternatives?: ConceptAlternativeResult[] | null
@@ -320,6 +322,7 @@ function ParametersPanel({
   developmentOpportunityBlockResult = null,
   conceptualProgram = null,
   conceptualLayout = null,
+  redevelopmentImpact = null,
   localStreetNetworkResult = null,
   terrainSuitability = null,
   conceptAlternatives,
@@ -1243,6 +1246,7 @@ function ParametersPanel({
           developmentOpportunityBlockResult={developmentOpportunityBlockResult}
           conceptualProgram={conceptualProgram}
           conceptualLayout={conceptualLayout}
+          redevelopmentImpact={redevelopmentImpact}
           localStreetNetworkResult={localStreetNetworkResult}
           terrainSuitability={terrainSuitability}
           parentParcelAreaAcres={parentParcelAreaAcres}

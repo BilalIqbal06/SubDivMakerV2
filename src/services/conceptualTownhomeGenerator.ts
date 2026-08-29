@@ -1,4 +1,5 @@
 import { turfc as turf, safeTurfOp, recomputeCounter, generationPerformance, VERBOSE_GIS_DIAGNOSTICS } from '../lib/perf'
+import { computeRedevelopmentDisturbance } from '../lib/redevelopmentContext'
 import { fastAlong, fastRhumbDestination } from './fastAlong'
 import { yieldIfNeeded } from '../lib/cooperativeScheduler'
 import type { ConceptualDevelopmentZone } from './conceptualDevelopmentProgram'
@@ -407,7 +408,8 @@ function computeQualityScore(
   roadType: string,
   terrainAssessment: string,
   hardConflictCount: number,
-  terrainPlacementScore?: number
+  terrainPlacementScore?: number,
+  rowGeometry?: GeoJSON.Feature<GeoJSON.Geometry> | null
 ): number {
   let score = 0
   score += Math.min(frontLengthFt / 200, 1) * 25
@@ -425,6 +427,12 @@ function computeQualityScore(
     score += terrainPlacementScore * 15
   }
   score -= Math.min(hardConflictCount, 5) * 2
+
+  if (rowGeometry) {
+    const rd = computeRedevelopmentDisturbance(rowGeometry)
+    score -= rd.totalPenalty * 0.01
+  }
+
   return Math.max(0, round3(score))
 }
 
@@ -1212,7 +1220,7 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
         accepted: true,
         rejectionReason: undefined,
         discoveryIndex,
-        qualityScore: computeQualityScore(frontLength, practicalDepth, cappedUnits.length, run.properties.roadType, zone.terrainAssessment, 0, currentRowPlacement?.placementScore)
+        qualityScore: computeQualityScore(frontLength, practicalDepth, cappedUnits.length, run.properties.roadType, zone.terrainAssessment, 0, currentRowPlacement?.placementScore, rowClipped)
       })
 
       if (capacityLimit != null && totalUnitCount >= capacityLimit) {

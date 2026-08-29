@@ -1,4 +1,5 @@
 import { recomputeCounter, turfc as turf, turfPerformance, VERBOSE_GIS_DIAGNOSTICS } from '../lib/perf'
+import { computeRedevelopmentDisturbance } from '../lib/redevelopmentContext'
 import { fastAlong, fastBearing } from './fastAlong'
 import { getTerrainDirectionAtPoint } from './terrainDirection'
 import { yieldIfNeeded } from '../lib/cooperativeScheduler'
@@ -271,6 +272,7 @@ export interface BranchCandidate {
   terrainRoadScore?: number
   terrainPenalty?: number
   grammarPenalty?: number
+  redevelopmentPenalty?: number
   terrainRoadMode?: 'CONTOUR_FOLLOWING' | 'FALL_LINE' | 'DIRECT_FALLBACK'
   _crossesPrimaryChecked?: boolean
   _conflictConstraintsChecked?: boolean
@@ -739,6 +741,14 @@ export function validateAndScoreCandidate(
   // Road grammar soft penalty.
   branch.grammarPenalty = computeSecondaryGrammarPenalty(branch, primaryCenterline, terrainSuitability, primaryTerrainMode)
 
+  // Redevelopment opportunity/disturbance scoring.
+  const rd = computeRedevelopmentDisturbance(branch.rightOfWay, {
+    servedDevelopableAreaSqFt: branch.newlyServedAreaSqFt,
+    isDirectAccess: true,
+    unlocksAdditionalAcreage: branch.newlyServedAreaSqFt > 10000
+  })
+  branch.redevelopmentPenalty = rd.totalPenalty
+
   branch.valid = true
   branch.rejectionReason = null
   branch.selectionReason = `newly serves ${Math.round(branch.newlyServedAreaSqFt).toLocaleString()} sq ft with a ${branch.lengthFt.toFixed(0)} ft branch at a ${branch.junctionAngle.toFixed(0)}° junction`
@@ -1033,8 +1043,8 @@ export async function generateSecondaryRoadNetwork(
           !selectedJunctionIndexes.has(c.junctionIndex ?? -1)
       )
       .sort((a, b) => {
-        const aFinal = a.newlyServedAreaSqFt - (a.terrainPenalty ?? 0) - (a.grammarPenalty ?? 0)
-        const bFinal = b.newlyServedAreaSqFt - (b.terrainPenalty ?? 0) - (b.grammarPenalty ?? 0)
+        const aFinal = a.newlyServedAreaSqFt - (a.terrainPenalty ?? 0) - (a.grammarPenalty ?? 0) - (a.redevelopmentPenalty ?? 0)
+        const bFinal = b.newlyServedAreaSqFt - (b.terrainPenalty ?? 0) - (b.grammarPenalty ?? 0) - (b.redevelopmentPenalty ?? 0)
         if (bFinal !== aFinal) return bFinal - aFinal
         if (a.lengthFt !== b.lengthFt) return a.lengthFt - b.lengthFt
         if (a.bendCount !== b.bendCount) return a.bendCount - b.bendCount
@@ -1068,8 +1078,8 @@ export async function generateSecondaryRoadNetwork(
             !selectedJunctionIndexes.has(c.junctionIndex ?? -1)
         )
         .sort((a, b) => {
-          const aFinal = a.newlyServedAreaSqFt - (a.terrainPenalty ?? 0)
-          const bFinal = b.newlyServedAreaSqFt - (b.terrainPenalty ?? 0)
+          const aFinal = a.newlyServedAreaSqFt - (a.terrainPenalty ?? 0) - (a.redevelopmentPenalty ?? 0)
+          const bFinal = b.newlyServedAreaSqFt - (b.terrainPenalty ?? 0) - (b.redevelopmentPenalty ?? 0)
           if (bFinal !== aFinal) return bFinal - aFinal
           if (a.lengthFt !== b.lengthFt) return a.lengthFt - b.lengthFt
           if (a.bendCount !== b.bendCount) return a.bendCount - b.bendCount

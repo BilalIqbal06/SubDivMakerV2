@@ -1,4 +1,5 @@
 import { turfc as turf, VERBOSE_GIS_DIAGNOSTICS, recomputeCounter, generationPerformance, turfCounter } from '../lib/perf'
+import { computeRedevelopmentDisturbance } from '../lib/redevelopmentContext'
 import { fastAlong, fastRhumbDestination, fastBearing } from './fastAlong'
 import { yieldIfNeeded } from '../lib/cooperativeScheduler'
 import type {
@@ -715,32 +716,51 @@ function lotCandidateQuality(
   area: number,
   frontage: number,
   depth: number,
-  preferredLotSize: number
+  preferredLotSize: number,
+  lotPoly?: GeoJSON.Feature<GeoJSON.Geometry> | null
 ): LotQuality {
-  const reasons: string[] = []
+  let reasons: string[] = []
   const minAcceptArea = preferredLotSize * 0.35
   const goodAreaMin = preferredLotSize * 0.7
   const goodAreaMax = preferredLotSize * 1.4
   const maxAcceptArea = preferredLotSize * 2.0
   const aspect = Math.max(frontage, depth) / Math.max(0.1, Math.min(frontage, depth))
+  let rating: LotQuality['rating']
+
   if (area < 1000 || area > maxAcceptArea * 2 || frontage < 20 || depth < 20) {
     if (area < 1000) reasons.push('area too small')
     if (area > maxAcceptArea * 2) reasons.push('area too large')
     if (frontage < 20) reasons.push('frontage too narrow')
     if (depth < 20) reasons.push('depth too shallow')
-    return { rating: 'REJECT', reasons }
+    rating = 'REJECT'
+    return { rating, reasons }
   }
+
   if (area < minAcceptArea || area > maxAcceptArea || aspect > 5) {
     if (area < minAcceptArea) reasons.push('area below preferred tolerance')
     if (area > maxAcceptArea) reasons.push('area above preferred tolerance')
     if (aspect > 5) reasons.push('aspect too extreme')
-    return { rating: 'POOR', reasons }
+    rating = 'POOR'
+  } else if (area >= goodAreaMin && area <= goodAreaMax && aspect <= 3 && frontage >= 35) {
+    rating = 'GOOD'
+  } else {
+    if (aspect > 4) reasons.push('aspect somewhat elongated')
+    rating = 'ACCEPTABLE'
   }
-  if (area >= goodAreaMin && area <= goodAreaMax && aspect <= 3 && frontage >= 35) {
-    return { rating: 'GOOD', reasons: ['area, aspect, and frontage within conceptual preferred range'] }
+
+  if (lotPoly) {
+    const rd = computeRedevelopmentDisturbance(lotPoly)
+    if (rd.impactLevel === 'HIGH') {
+      reasons.push('redevelopment disturbance high')
+      if (rating === 'GOOD') rating = 'ACCEPTABLE'
+      else if (rating === 'ACCEPTABLE') rating = 'POOR'
+    } else if (rd.impactLevel === 'MODERATE' && rating === 'GOOD') {
+      reasons.push('redevelopment disturbance moderate')
+      rating = 'ACCEPTABLE'
+    }
   }
-  if (aspect > 4) reasons.push('aspect somewhat elongated')
-  return { rating: 'ACCEPTABLE', reasons: reasons.length ? reasons : ['meets conceptual lot acceptability thresholds'] }
+
+  return { rating, reasons: reasons.length ? reasons : ['meets conceptual lot acceptability thresholds'] }
 }
 
 function makeEnvelopeForLot(lot: any, lotId: string, terrainSuitability?: TerrainSuitabilityResult | null): ConceptualBuildingEnvelope | null {
@@ -1159,7 +1179,7 @@ export async function generateSingleFamilyLots(
       const area = areaSqFt(lotPoly)
       const frontage = frontLen
       const depth = area / Math.max(0.1, frontage)
-      const quality = lotCandidateQuality(area, frontage, depth, targetArea)
+      const quality = lotCandidateQuality(area, frontage, depth, targetArea, lotPoly)
 
       let rejectReason: string | null = null
       if (quality.rating === 'REJECT') {
