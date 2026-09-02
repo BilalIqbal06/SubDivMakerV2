@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/SubDivMakerV2/' : '/',
   plugins: [react()],
   server: {
     port: 3004,
@@ -25,4 +26,4 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true
   }
-})
+}))
