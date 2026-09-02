@@ -16,6 +16,7 @@ export default function SearchBar({ onAddressSelect, onParcelSelect, onNavigateT
   const [loading, setLoading] = useState(false)
   const [showResults, setShowResults] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(-1)
+  const [error, setError] = useState<string | null>(null)
 
   const abortControllerRef = useRef<AbortController | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -62,6 +63,7 @@ export default function SearchBar({ onAddressSelect, onParcelSelect, onNavigateT
 
     setLoading(true)
     setShowResults(true)
+    setError(null)
 
     try {
       // Cancel previous request
@@ -91,8 +93,8 @@ export default function SearchBar({ onAddressSelect, onParcelSelect, onNavigateT
       }
     } catch (error: any) {
       if (error.name !== 'AbortError' && currentRequestId === requestIdRef.current) {
-        console.error('Search failed:', error)
-        setResults([])
+        setError('Search request failed. Please check your connection and try again.')
+        setShowResults(false)
       }
     } finally {
       if (currentRequestId === requestIdRef.current) {
@@ -241,6 +243,12 @@ export default function SearchBar({ onAddressSelect, onParcelSelect, onNavigateT
           </button>
         )}
       </div>
+
+      {error && (
+        <div className="mt-2 p-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
 
       {showResults && (
         <div 

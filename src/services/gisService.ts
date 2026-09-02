@@ -262,48 +262,53 @@ async function arcGISAttributeQuery(
     : 'arcgis-attribute'
   const requestKey = `${category}:${Date.now()}:${Math.random().toString(36).slice(2)}`
   networkCounter.start(category, requestKey)
+  let responseStatus: number | null = null
   try {
-  const params = new URLSearchParams({
-    where: '1=1',
-    outFields: '*',
-    returnGeometry: 'true',
-    outSR: '4326',
-    f: 'geojson',
-    resultRecordCount: '500',
-    ...queryParams
-  })
-
-  const requestUrl = url
-  
-  const response = await fetch(requestUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
-    },
-    body: params,
-    signal
-  })
-  
-  if (!response.ok) {
-    const errorText = await response.text()
-    console.error('ArcGIS attribute query failed:', {
-      status: response.status,
-      statusText: response.statusText,
-      request: requestUrl,
-      response: errorText
+    const params = new URLSearchParams({
+      where: '1=1',
+      outFields: '*',
+      returnGeometry: 'true',
+      outSR: '4326',
+      f: 'geojson',
+      resultRecordCount: '500',
+      ...queryParams
     })
-    throw new Error(`ArcGIS query failed: ${response.status} ${response.statusText}`)
-  }
-  
-  const data = await response.json()
-  
-  // Check for ArcGIS error object
-  if (data.error) {
-    console.error('ArcGIS error in attribute query:', data.error)
-    throw new Error(`ArcGIS error: ${data.error.message || 'Unknown error'}`)
-  }
+
+    const requestUrl = url
+
+    const response = await fetch(requestUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+      },
+      body: params,
+      signal
+    })
+    responseStatus = response.status
+
+    if (!response.ok) {
+      throw new Error(`ArcGIS query failed: ${response.status} ${response.statusText} — ${requestUrl}`)
+    }
+
+    const data = await response.json()
+
+    // Check for ArcGIS error object
+    if (data.error) {
+      throw new Error(`ArcGIS error: ${data.error.message || 'Unknown error'} — ${requestUrl}`)
+    }
 
     return (data.features || []) as any[]
+  } catch (error) {
+    if (import.meta.env.DEV && (category === 'parcel' || category === 'addresses')) {
+      console.error('[ParcelSearchDiagnostic]', {
+        searchType: category,
+        requestedValue: queryParams.where ?? null,
+        requestUrl: url,
+        status: responseStatus,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+    throw error
   } finally {
     networkCounter.finish(category, requestKey)
   }

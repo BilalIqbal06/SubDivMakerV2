@@ -12,3 +12,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+declare const __LOGIS_GIS_BASE_URL__: string
+declare const __LOUDOUN_GIS_BASE_URL__: string
