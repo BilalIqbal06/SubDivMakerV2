@@ -22,6 +22,14 @@ function orientationDifferenceDeg(a: number, b: number): number { return Math.ab
 
 const LOCAL_GRAMMAR_INFLUENCE_PCT = 0.05
 
+// Batch 1: exact target/buildable intersection cache. The context object is the
+// immutable precomputed container for a single authoritative transaction, and the
+// target object is the immutable target being evaluated. The result depends only
+// on those two inputs, so object identity is a safe cache key.
+const targetBuildableCache = new WeakMap<any, Map<any, any>>()
+let targetBuildableCacheHits = 0
+let localStreetCandidateCalls = 0
+
 function computeLocalGrammarPenalty(
   centerline: GeoJSON.Feature<GeoJSON.LineString>,
   mode: 'CONTOUR_FOLLOWING' | 'FALL_LINE' | 'DIRECT_FALLBACK',
@@ -90,6 +98,9 @@ export interface FastLocalStreetStageTimings {
   totalMs: number
   baselineLotIntersectionAttempts: number
   baselineLotIntersectionActualIntersects: number
+  targetBuildableCacheHits?: number
+  targetBuildableCacheMisses?: number
+  localStreetCandidateCalls?: number
 }
 
 export interface CandidateLayoutSnapshot {
@@ -164,6 +175,8 @@ export function precomputeFastLocalStreetContext(
   programResult: ConceptualDevelopmentProgramResult,
   projectParameters?: ProjectParameters | null
 ): FastLocalStreetPrecomputedContext {
+  targetBuildableCacheHits = 0
+  localStreetCandidateCalls = 0
   const hard: GeoJSON.Feature<GeoJSON.Polygon>[] = []
   if (constraints.buildingUnionGeometry) hard.push(...polygonFeaturesForConstraints(constraints.buildingUnionGeometry))
   if (constraints.hydrologyGeometry) hard.push(...polygonFeaturesForConstraints(constraints.hydrologyGeometry))
@@ -279,10 +292,23 @@ export async function evaluateLocalStreetCandidate(ctx: FastLocalStreetEvaluatio
   const s3 = performance.now()
   let buildable: any = null
   if (precomputed.baselineUnusedBuildable) {
-    const targetBuildable = safeTurfOp(() =>
-      (turf as any).intersect(turf.featureCollection([precomputed.baselineUnusedBuildable, target.geometry])),
-      null
-    )
+    localStreetCandidateCalls++
+    let subCache = targetBuildableCache.get(precomputed)
+    if (!subCache) {
+      subCache = new Map()
+      targetBuildableCache.set(precomputed, subCache)
+    }
+    let targetBuildable: any
+    if (subCache.has(target)) {
+      targetBuildableCacheHits++
+      targetBuildable = subCache.get(target)
+    } else {
+      targetBuildable = safeTurfOp(() =>
+        (turf as any).intersect(turf.featureCollection([precomputed.baselineUnusedBuildable, target.geometry])),
+        null
+      )
+      subCache.set(target, targetBuildable)
+    }
     const localRowPolygons = polygonFeaturesForConstraints(candidate.rightOfWayGeometry)
     buildable = targetBuildable
       ? computeAvailableGeometry(targetBuildable, null, localRowPolygons)
@@ -492,4 +518,8 @@ export async function evaluateLocalStreetCandidate(ctx: FastLocalStreetEvaluatio
     stageTimings,
     localGrammarPenalty
   }
+}
+
+export function getLocalStreetCacheStats(): { candidateCalls: number; targetBuildableCacheHits: number } {
+  return { candidateCalls: localStreetCandidateCalls, targetBuildableCacheHits: targetBuildableCacheHits }
 }

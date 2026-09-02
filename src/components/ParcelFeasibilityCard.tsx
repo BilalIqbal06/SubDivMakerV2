@@ -39,6 +39,29 @@ function fmtPct(n: number | null): string {
 export default function ParcelFeasibilityCard({ assessment, isAnalyzing, onContinue }: ParcelFeasibilityCardProps) {
   const [showDetails, setShowDetails] = useState(false)
 
+  const continueButton = onContinue ? (
+    <button
+      onClick={onContinue}
+      disabled={!assessment}
+      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-[14px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+      style={{
+        background: assessment ? 'var(--button-gradient)' : 'rgba(64, 130, 109, 0.2)',
+        color: assessment ? 'var(--brand-black)' : 'var(--text-secondary)',
+        border: '1px solid var(--viridian)'
+      }}
+      onMouseEnter={(e) => {
+        if (!assessment) return
+        e.currentTarget.style.transform = 'translateY(-1px)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = 'translateY(0)'
+      }}
+    >
+      Continue to Parameters
+      <ArrowRight className="w-4 h-4" />
+    </button>
+  ) : null
+
   if (isAnalyzing || !assessment) {
     return (
       <div className="rounded-lg p-4 border" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
@@ -50,6 +73,7 @@ export default function ParcelFeasibilityCard({ assessment, isAnalyzing, onConti
             <p className="text-[12px]" style={{ color: 'var(--text-muted)' }}>Screening parcel constraints and buildable area.</p>
           </div>
         </div>
+        {continueButton}
       </div>
     )
   }
@@ -146,28 +170,7 @@ export default function ParcelFeasibilityCard({ assessment, isAnalyzing, onConti
       </div>
 
       {/* Continue CTA */}
-      {onContinue && (
-        <button
-          onClick={onContinue}
-          disabled={!assessment}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-[14px] font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{
-            background: assessment ? 'var(--button-gradient)' : 'rgba(64, 130, 109, 0.2)',
-            color: assessment ? 'var(--brand-black)' : 'var(--text-secondary)',
-            border: '1px solid var(--viridian)'
-          }}
-          onMouseEnter={(e) => {
-            if (!assessment) return
-            e.currentTarget.style.transform = 'translateY(-1px)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)'
-          }}
-        >
-          Continue to Parameters
-          <ArrowRight className="w-4 h-4" />
-        </button>
-      )}
+      {continueButton}
 
       <p className="text-[11px] leading-[1.4] mt-3" style={{ color: 'var(--text-muted)' }}>
         Preliminary GIS screening only. This assessment does not replace survey, zoning, environmental, utility, geotechnical, or engineering due diligence.

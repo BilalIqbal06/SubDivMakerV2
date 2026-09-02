@@ -1,5 +1,6 @@
 import { startCpuSlice, resetYieldCount, yieldToMainThread, getYieldCount, getYieldWallClockMs } from '../lib/cooperativeScheduler'
-import { recomputeCounter, turfc as turf, safeTurfOp, ENABLE_EXPENSIVE_PERFORMANCE_DIAGNOSTICS } from '../lib/perf'
+import { PipCache, getActivePipCache, setActivePipCache } from '../lib/perf'
+
 import { generateAuthoritativeConceptInWorker } from '../lib/generationWorkerService'
 import {
   setActiveRedevelopmentContext,
@@ -9,7 +10,7 @@ import {
 } from '../lib/redevelopmentContext'
 import type { RedevelopmentImpactMetrics } from '../lib/redevelopmentContext'
 import type { RoadData } from './gisService'
-import { runTerrainQueryAudit, getTerrainLineQueryAudit, resetTerrainLineQueryCache } from './terrainSuitabilityQuery'
+import { resetTerrainLineQueryCache, resetTerrainQueryCounters } from './terrainSuitabilityQuery'
 import type {
   ProjectParameters,
   CandidateOpenAreaResult,
@@ -34,11 +35,8 @@ import type { ConceptAlternativeResult, ConceptStrategy } from '../types/concept
 import { computeTerrainSuitability } from './terrainBuildabilityService'
 import type { TerrainSuitabilityResult } from '../types/terrain'
 
-// Phase 7.1 — Expensive DEV terrain-query audit is opt-in only.
-// It does NOT affect generated geometry or scoring and is excluded from the
-// normal authoritative-generation critical path. Toggle to true for deliberate
-// diagnostic work only.
-const ENABLE_EXPENSIVE_TERRAIN_QUERY_AUDIT = false
+let authoritativeConceptInvocationCount = 0
+
 
 const conceptResultCache = new Map<string, AuthoritativeConceptResult>()
 
@@ -108,6 +106,18 @@ export async function generateAuthoritativeConcept(
 ): Promise<AuthoritativeConceptResult> {
   const effectiveRunId = runId ?? Date.now()
   const transactionId = `${effectiveRunId}-${Math.random().toString(36).slice(2, 11)}`
+  authoritativeConceptInvocationCount++
+
+  console.log('[SubDivMaker Generation Invocation Audit]', {
+    phase: 'start',
+    invocationCount: authoritativeConceptInvocationCount,
+    transactionId,
+    mcpi: input.mcpi,
+    strategy: input.targetAlternativeId,
+    analysisRunId: input.analysisRunId,
+    timestamp: new Date().toISOString()
+  })
+
   const {
     mcpi,
     targetAlternativeId,
@@ -119,18 +129,16 @@ export async function generateAuthoritativeConcept(
   const conceptCacheKey = buildConceptCacheKey(mcpi, targetAlternativeId, projectParameters, analysisRunId)
   const cachedConcept = conceptResultCache.get(conceptCacheKey)
   if (cachedConcept) {
-    if (import.meta.env.DEV) {
-      console.log('[ConceptAlternativeCacheAudit]', {
-        mcpi,
-        strategy: targetAlternativeId,
-        cacheHit: true,
-        primaryRoadExecutions: 0,
-        secondaryRoadExecutions: 0,
-        localStreetExecutions: 0,
-        townhomeExecutions: 0,
-        conceptCacheKey
-      })
-    }
+    console.log('[SubDivMaker Generation Invocation Audit]', {
+      phase: 'cache-hit',
+      invocationCount: authoritativeConceptInvocationCount,
+      transactionId,
+      mcpi,
+      strategy: targetAlternativeId,
+      analysisRunId,
+      cacheHit: true,
+      timestamp: new Date().toISOString()
+    })
     return structuredClone(cachedConcept)
   }
 
@@ -166,22 +174,25 @@ export async function generateAuthoritativeConcept(
   const transactionFinishTimestamp = new Date().toISOString()
   const mainThreadVisibilityAtFinish = typeof document !== 'undefined' ? document.visibilityState : 'unknown'
 
-  if (import.meta.env.DEV) {
-    console.log('[GenerationWorkerAudit]', {
-      transactionId,
-      alternativeId: targetAlternativeId,
-      workerUsed,
-      fallback: fallbackReason != null,
-      fallbackReason,
-      startTime: transactionStartTimestamp,
-      finishTime: transactionFinishTimestamp,
-      totalMs: Math.round(transactionFinish - transactionStart),
-      cancelled: signal?.aborted ?? false,
-      success: !signal?.aborted && result != null,
-      mainThreadVisibilityAtStart,
-      mainThreadVisibilityAtFinish
-    })
-  }
+
+  console.log('[SubDivMaker Generation Invocation Audit]', {
+    phase: 'complete',
+    invocationCount: authoritativeConceptInvocationCount,
+    transactionId,
+    mcpi,
+    strategy: targetAlternativeId,
+    analysisRunId,
+    workerUsed,
+    fallback: fallbackReason != null,
+    fallbackReason,
+    startTime: transactionStartTimestamp,
+    finishTime: transactionFinishTimestamp,
+    totalMs: Math.round(transactionFinish - transactionStart),
+    cancelled: signal?.aborted ?? false,
+    success: !signal?.aborted && result != null,
+    mainThreadVisibilityAtStart,
+    mainThreadVisibilityAtFinish
+  })
 
   conceptResultCache.set(conceptCacheKey, result)
   return structuredClone(result)
@@ -218,18 +229,6 @@ export async function runAuthoritativeConceptTransaction(
   const conceptCacheKey = buildConceptCacheKey(mcpi, targetAlternativeId, projectParameters, analysisRunId)
   const cachedConcept = conceptResultCache.get(conceptCacheKey)
   if (cachedConcept) {
-    if (import.meta.env.DEV) {
-      console.log('[ConceptAlternativeCacheAudit]', {
-        mcpi,
-        strategy: targetAlternativeId,
-        cacheHit: true,
-        primaryRoadExecutions: 0,
-        secondaryRoadExecutions: 0,
-        localStreetExecutions: 0,
-        townhomeExecutions: 0,
-        conceptCacheKey
-      })
-    }
     return structuredClone(cachedConcept)
   }
 
@@ -238,6 +237,8 @@ export async function runAuthoritativeConceptTransaction(
   }
   resetYieldCount()
   resetTerrainLineQueryCache()
+  resetTerrainQueryCounters()
+  setActivePipCache(new PipCache())
   const transactionStart = performance.now()
   const transactionStartTimestamp = new Date().toISOString()
   const visibilityAtStart = typeof document !== 'undefined' ? document.visibilityState : 'unknown'
@@ -266,6 +267,7 @@ export async function runAuthoritativeConceptTransaction(
     signal
   })
   recordStage('terrainSuitability', tSuitability)
+
 
   const roadPrecedentStreets = input.roadPrecedentStreets ?? await fetchRoadPrecedentStreets(mcpi, parcelGeometry, signal)
 
@@ -357,6 +359,7 @@ export async function runAuthoritativeConceptTransaction(
 
   recordStage('developmentProgram', tProgram)
 
+
   // Local street constraints
   const localStreetConstraints: LayoutConstraints = {
     conceptualRoadResult: primaryResult,
@@ -392,154 +395,24 @@ export async function runAuthoritativeConceptTransaction(
 
   recordStage('localStreetEvaluation', tLocalStreet)
 
-  if (import.meta.env.DEV) {
-    const secondaryRoads = secondaryResult.status !== 'unavailable' ? secondaryResult.roads : []
-    const localStreets = lsResult.localStreetNetworkResult.localStreets
-    const allAlternatives = (primaryResult.terrainAlternatives as any[] | undefined) ?? []
-    const contour = allAlternatives.filter((a: any) => a.terrainRoadMode === 'CONTOUR_FOLLOWING')
-    const fallLine = allAlternatives.filter((a: any) => a.terrainRoadMode === 'FALL_LINE')
-    const direct = allAlternatives.filter((a: any) => a.terrainRoadMode === 'DIRECT_FALLBACK')
-    const firstValidContour = contour.filter((a: any) => a.hardValid)[0]
-    const firstValidFallLine = fallLine.filter((a: any) => a.hardValid)[0]
-    const bestContour = contour.filter((a: any) => a.hardValid).sort((a: any, b: any) => (b.terrainAlignmentScore ?? 0) - (a.terrainAlignmentScore ?? 0))[0]
-    const bestFallLine = fallLine.filter((a: any) => a.hardValid).sort((a: any, b: any) => (b.terrainAlignmentScore ?? 0) - (a.terrainAlignmentScore ?? 0))[0]
-    const contourValidCount = contour.filter((a: any) => a.hardValid).length
-    const fallLineValidCount = fallLine.filter((a: any) => a.hardValid).length
-    const rejectionReasons = (mode: string) => {
-      const counts: Record<string, number> = {}
-      for (const a of allAlternatives) {
-        if (a.terrainRoadMode !== mode || !a.rejectionCategory || a.hardValid) continue
-        counts[a.rejectionCategory] = (counts[a.rejectionCategory] || 0) + 1
-      }
-      return counts
-    }
-    const selectedMode = primaryResult.terrainRoadMode ?? 'DIRECT_FALLBACK'
-    const fallbackReason = selectedMode === 'DIRECT_FALLBACK'
-      ? (primaryResult.terrainFallbackReason ?? 'NO_VALID_TERRAIN_CANDIDATES')
-      : null
-    const fallbackReasonDetail = selectedMode === 'DIRECT_FALLBACK'
-      ? (primaryResult.terrainFallbackReasonDetail ?? primaryResult.terrainSelectionReason ?? null)
-      : null
-    const primaryRowWidthFt = projectParameters.roads?.rightOfWayWidth ?? 50
-    const requiredCenterlineInsetFt = (primaryRowWidthFt / 2) + 5
-    const rowSafety = primaryResult.primaryRoadRowSafety ?? {
-      primaryRowWidthFt,
-      requiredCenterlineInsetFt,
-      safeCenterlineAreaAvailable: allAlternatives.length > 0,
-      safeCenterlineMethod: allAlternatives.length > 0 ? 'BOUNDARY_DISTANCE_FALLBACK' : 'UNAVAILABLE',
-      safeCenterlineAreaGeometryType: null,
-      safeCenterlineAreaSqFt: null,
-      safeCenterlineFailureReason: null
-    }
-    const collapseReasons = (mode: string) => {
-      const counts: Record<string, number> = {}
-      for (const a of allAlternatives) {
-        if (a.terrainRoadMode !== mode || a.rejectionCategory !== 'COLLAPSED_TO_BASELINE' || a.hardValid) continue
-        counts[a.rejectionReason] = (counts[a.rejectionReason] || 0) + 1
-      }
-      return counts
-    }
-    const meanSecondaryAngle = secondaryRoads.length
-      ? secondaryRoads.reduce((s, r) => s + (r.junctionAngle ?? 0), 0) / secondaryRoads.length
-      : null
-    const meanSecondaryGrammar = secondaryRoads.length
-      ? secondaryRoads.reduce((s, r) => s + (r.grammarPenalty ?? 0), 0) / secondaryRoads.length
-      : null
-    const meanLocalAngle = localStreets.length
-      ? 90
-      : null
-    const meanLocalGrammar = localStreets.length
-      ? localStreets.reduce((s, r) => s + (r.localGrammarPenalty ?? 0), 0) / localStreets.length
-      : null
-    console.log('[RoadGrammarAudit]', {
-      mcpi,
-      primaryMode: primaryResult.terrainRoadMode ?? 'DIRECT_FALLBACK',
-      primaryGrammar: {
-        contourGeneratedCount: contour.length,
-        contourValidCount,
-        fallLineGeneratedCount: fallLine.length,
-        fallLineValidCount,
-        directGeneratedCount: direct.length + (selectedMode === 'DIRECT_FALLBACK' ? 1 : 0),
-        selectedMode,
-        selectedTerrainAlignmentScore: primaryResult.terrainAlignmentScore ?? null,
-        selectedRoadPrecedentScore: primaryResult.roadPrecedentScore ?? null,
-        bestContourScore: bestContour?.terrainAlignmentScore ?? null,
-        bestFallLineScore: bestFallLine?.terrainAlignmentScore ?? null,
-        bestDirectScore: null,
-        firstValidContourCandidate: firstValidContour
-          ? { id: firstValidContour.id, roadLengthFt: firstValidContour.lengthFt, terrainAlignmentScore: firstValidContour.terrainAlignmentScore }
-          : null,
-        firstValidFallLineCandidate: firstValidFallLine
-          ? { id: firstValidFallLine.id, roadLengthFt: firstValidFallLine.lengthFt, terrainAlignmentScore: firstValidFallLine.terrainAlignmentScore }
-          : null,
-        rejectionReasons: {
-          contour: rejectionReasons('CONTOUR_FOLLOWING'),
-          fallLine: rejectionReasons('FALL_LINE')
-        },
-        fallbackReason,
-        fallbackReasonDetail,
-        rowSafety,
-        collapseReasons: {
-          contour: collapseReasons('CONTOUR_FOLLOWING'),
-          fallLine: collapseReasons('FALL_LINE')
-        }
-      },
-      secondaryGrammar: {
-        modeReceived: primaryResult.terrainRoadMode ?? 'DIRECT_FALLBACK',
-        candidateCount: secondaryRoads.length,
-        selectedBranchCount: secondaryRoads.length,
-        meanIntersectionAngleDeg: meanSecondaryAngle,
-        meanTerrainAlignmentScore: meanSecondaryGrammar,
-        grammarPreference: primaryResult.terrainRoadMode === 'CONTOUR_FOLLOWING'
-          ? 'FALL_LINE_BIASED'
-          : primaryResult.terrainRoadMode === 'FALL_LINE'
-            ? 'CONTOUR_BIASED'
-            : 'EXISTING_LOGIC'
-      },
-      localGrammar: {
-        modeReceived: primaryResult.terrainRoadMode ?? 'DIRECT_FALLBACK',
-        candidateCount: localStreets.length,
-        selectedLocalStreetCount: localStreets.length,
-        meanIntersectionAngleDeg: meanLocalAngle,
-        meanTerrainAlignmentScore: meanLocalGrammar,
-        grammarPreference: primaryResult.terrainRoadMode === 'CONTOUR_FOLLOWING'
-          ? 'FRONTAGE_WITH_CONTOUR_BIAS'
-          : primaryResult.terrainRoadMode === 'FALL_LINE'
-            ? 'FRONTAGE_WITH_CROSS_CONTOUR_BIAS'
-            : 'EXISTING_LOGIC'
-      }
-    })
-  }
 
   // Townhomes — the target unit count is computed from the townhome share of road-served area in the layout.
   let townhomeResult: TownhomeGenerationResult | null = null
   const thInput = lsResult.finalLayout.townhomeInputs
   const tTownhome = performance.now()
   if (thInput) {
+    const townhomeTargetDensity = programResult.targetDensity ?? projectParameters.zoningAndLots?.targetDensity ?? 6
+    const townhomeAssignedZones = thInput.zones.filter(z => thInput.assignments.get(z.id) === 'townhomes')
+    const townhomeServedAreaAcres = townhomeAssignedZones.reduce((s, z) => s + (z.actualRoadServedAreaAcres ?? 0), 0)
+    const townhomeTargetUnitCount =
+      townhomeServedAreaAcres > 0 && townhomeTargetDensity > 0
+        ? Math.round(townhomeServedAreaAcres * townhomeTargetDensity)
+        : null
+
+
     townhomeResult = await generateConceptualTownhomes({ ...thInput, alternativeId: 'BALANCED', signal })
 
-    if (import.meta.env.DEV && townhomeResult) {
-      const capacity = thInput.targetUnitCount ?? null
-      const targetDensity = programResult.targetDensity ?? projectParameters.zoningAndLots?.targetDensity ?? 6
-      const totalNetworkServedAcres = programResult.actualTotalNetworkServedAreaAcres
-      const townhomeAssignedZones = thInput.zones.filter(z => thInput.assignments.get(z.id) === 'townhomes')
-      const townhomeAssignedServedAcres = townhomeAssignedZones.reduce((s, z) => s + (z.actualRoadServedAreaAcres ?? 0), 0)
-      const townhomeAssignedZoneCount = townhomeAssignedZones.length
-      const authoritativeConceptualUnits = Math.round(totalNetworkServedAcres * targetDensity)
-      console.log('[TownhomeCapacityAudit]', {
-        mcpi,
-        selectedDevelopmentTypes: programResult.selectedDevelopmentTypes,
-        totalNetworkServedAcres,
-        townhomeAssignedServedAcres,
-        townhomeAssignedZoneCount,
-        targetDensity,
-        authoritativeConceptualUnits,
-        targetUnitCount: thInput.targetUnitCount,
-        generatedTownhomeUnits: townhomeResult.unitCount,
-        generatedTownhomeRows: townhomeResult.rowCount,
-        capacityRespected: capacity == null || townhomeResult.unitCount <= capacity
-      })
-    }
+
   }
   recordStage('townhomeGeneration', tTownhome)
 
@@ -661,92 +534,7 @@ export async function runAuthoritativeConceptTransaction(
   const bundleConstructionMs = performance.now() - tFinalAssembly
   recordStage('finalAssembly', tFinalAssembly)
 
-  // Phase 7B.1 — DEV-only expensive terrain query audit, opt-in only.
-  // This is outside the production finalAssembly timing boundary and must
-  // never affect geometry, scoring, or cache behavior.
-  let terrainAudit: any = null
-  let terrainAuditExecutions = 0
-
-  if (ENABLE_EXPENSIVE_TERRAIN_QUERY_AUDIT && import.meta.env.DEV && terrainSuitability && terrainSuitability.status === 'completed') {
-    try {
-      const parcelCenter = safeTurfOp(() => turf.centroid(parcelGeometry), null)
-      const primaryRoadCenterline = primaryResult?.proposedRoadCenterline ?? null
-      const zoneGeometry = programResult?.zones?.[0]?.geometry ?? null
-      terrainAudit = runTerrainQueryAudit(mcpi, terrainSuitability, parcelCenter, primaryRoadCenterline, zoneGeometry)
-      terrainAuditExecutions = 1
-      if (terrainAudit) {
-        console.log('[TerrainQueryAudit]', {
-          mcpi,
-          pointQuery: {
-            available: terrainAudit.pointQuery.available,
-            class: terrainAudit.pointQuery.class,
-            slopePct: terrainAudit.pointQuery.slopePct,
-            queryMs: terrainAudit.pointQuery.queryMs
-          },
-          primaryRoadQuery: {
-            dominantClass: terrainAudit.primaryRoadQuery.dominantClass,
-            preferredFraction: terrainAudit.primaryRoadQuery.preferredFraction,
-            moderateFraction: terrainAudit.primaryRoadQuery.moderateFraction,
-            challengingFraction: terrainAudit.primaryRoadQuery.challengingFraction,
-            avoidFraction: terrainAudit.primaryRoadQuery.avoidFraction,
-            insufficientDataFraction: terrainAudit.primaryRoadQuery.insufficientDataFraction,
-            meanSlopePct: terrainAudit.primaryRoadQuery.meanSlopePct,
-            maxSlopePct: terrainAudit.primaryRoadQuery.maxSlopePct,
-            queryMs: terrainAudit.primaryRoadQuery.queryMs
-          },
-          zoneQuery: {
-            dominantClass: terrainAudit.zoneQuery.dominantClass,
-            preferredPercent: terrainAudit.zoneQuery.preferredPercent,
-            moderatePercent: terrainAudit.zoneQuery.moderatePercent,
-            challengingPercent: terrainAudit.zoneQuery.challengingPercent,
-            avoidPercent: terrainAudit.zoneQuery.avoidPercent,
-            insufficientDataPercent: terrainAudit.zoneQuery.insufficientDataPercent,
-            meanSlopePct: terrainAudit.zoneQuery.meanSlopePct,
-            maxSlopePct: terrainAudit.zoneQuery.maxSlopePct,
-            queryMs: terrainAudit.zoneQuery.queryMs
-          },
-          percentageReconciliation: terrainAudit.percentageReconciliation,
-          totalQueryMs: terrainAudit.pointQuery.queryMs + terrainAudit.primaryRoadQuery.queryMs + terrainAudit.zoneQuery.queryMs
-        })
-      }
-    } catch {
-      // Terrain query audit errors must never fail the concept transaction.
-    }
-  }
-
   const totalTransactionMs = performance.now() - transactionStart
-
-  if (import.meta.env.DEV) {
-    console.log('[FinalAssemblyOptimizationAudit]', {
-      mcpi,
-      alternativeId: targetAlternativeId,
-      expensiveTerrainAuditEnabled: ENABLE_EXPENSIVE_TERRAIN_QUERY_AUDIT,
-      expensiveTerrainAuditExecutions: terrainAuditExecutions,
-      finalAssemblyMs: Math.round(bundleConstructionMs * 100) / 100,
-      bundleConstructionMs: Math.round(bundleConstructionMs * 100) / 100
-    })
-
-    console.log('[FinalAssemblyEquivalenceSnapshot]', {
-      mcpi,
-      selectedAlternativeId: targetAlternativeId,
-      recommendedAlternativeId: nextRecommendedAlternativeId,
-      totalTransactionMs,
-      generatedUnits: bundle.selectedFinalLayout?.lotCount ?? 0,
-      conceptualTarget: bundle.conceptualProgram?.targetDensity ?? null,
-      servedDevelopableAcres: bundle.selectedFinalLayout?.layoutAreaAcres ?? 0,
-      totalRoadLengthFt: (bundle.primaryRoadResult?.proposedRoadLengthFeet ?? 0) + (bundle.secondaryRoadNetworkResult?.totalSecondaryRoadLengthFt ?? 0) + (bundle.localStreetNetworkResult?.totalLocalStreetLengthFt ?? 0),
-      primaryRoadLengthFt: bundle.primaryRoadResult?.proposedRoadLengthFeet ?? 0,
-      secondaryRoadCount: bundle.secondaryRoadNetworkResult?.roads?.length ?? 0,
-      secondaryRoadTotalLengthFt: bundle.secondaryRoadNetworkResult?.totalSecondaryRoadLengthFt ?? 0,
-      localStreetCount: bundle.localStreetNetworkResult?.localStreetCount ?? 0,
-      localStreetTotalLengthFt: bundle.localStreetNetworkResult?.totalLocalStreetLengthFt ?? 0,
-      developmentZoneCount: bundle.conceptualProgram?.zones?.length ?? 0,
-      developmentPadCount: bundle.selectedFinalLayout?.developmentPadCount ?? 0,
-      buildingEnvelopeCount: bundle.selectedFinalLayout?.buildingEnvelopeCount ?? 0,
-      townhomeRowCount: bundle.townhomeGenerationResult?.rowCount ?? 0,
-      townhomeUnitCount: bundle.townhomeGenerationResult?.unitCount ?? 0
-    })
-  }
 
   conceptResultCache.set(conceptCacheKey, bundle)
 
@@ -771,113 +559,62 @@ export async function runAuthoritativeConceptTransaction(
     }))
   }
 
-  if (import.meta.env.DEV) {
-    console.log('[ConceptAlternativesPerformanceAudit]', conceptAlternativesPerformanceAudit)
-  }
-
-  const counts = recomputeCounter.get()
-
   const largestStage = stageTimings.reduce((max, s) => s.totalMs > max.totalMs ? s : max, stageTimings[0] ?? { name: 'none', totalMs: 0, executions: 0 })
   const largestStagePercent = totalTransactionMs > 0 ? Math.round((largestStage.totalMs / totalTransactionMs) * 1000) / 10 : 0
 
-  if (import.meta.env.DEV) {
-    const transactionFinishTimestamp = new Date().toISOString()
-    const visibilityAtFinish = typeof document !== 'undefined' ? document.visibilityState : 'unknown'
-    const selectedDevelopmentTypes = projectParameters.developmentProgram?.filter(u => u.enabled).map(u => u.useType) ?? []
-    const rankedStages = [...stageTimings]
-      .sort((a, b) => b.totalMs - a.totalMs)
-      .map((s, i) => ({
-        rank: i + 1,
-        name: s.name,
-        totalMs: s.totalMs,
-        percentOfGeneration: totalTransactionMs > 0 ? (s.totalMs / totalTransactionMs) * 100 : 0
-      }))
-    const accountedMs = rankedStages.reduce((s, r) => s + r.totalMs, 0)
-    const unaccountedMs = Math.max(0, totalTransactionMs - accountedMs)
-    console.log('[GenerationBottleneckAudit]', {
-      mcpi,
-      alternativeId: targetAlternativeId,
-      totalMs: totalTransactionMs,
-      rankedStages,
-      accountedMs,
-      unaccountedMs,
-      unaccountedPercent: totalTransactionMs > 0 ? (unaccountedMs / totalTransactionMs) * 100 : 0
-    })
 
-    console.log('[AuthoritativeStageTimingAudit]', {
-      mcpi,
-      totalMs: totalTransactionMs,
-      stages: stageTimings,
-      largestStage: largestStage.name,
-      largestStageMs: largestStage.totalMs,
-      largestStagePercent,
-      selectedDevelopmentTypes,
-      developmentIntensity: projectParameters.zoningAndLots?.targetDensity ?? null,
-      candidateFullLayouts: counts['layout-candidate'] ?? 0
-    })
-
-    console.log('[AuthoritativeGenerationPerformanceAudit]', {
-      mcpi,
-      alternativeId: targetAlternativeId,
-      startTime: transactionStartTimestamp,
-      finishTime: transactionFinishTimestamp,
-      totalMs: totalTransactionMs,
-      visibilityAtStart,
-      visibilityAtFinish,
-      yieldCount: getYieldCount(),
-      yieldWallClockMs: getYieldWallClockMs(),
-      stages: stageTimings,
-      slowestStage: largestStage.name,
-      slowestStageMs: largestStage.totalMs,
-      slowestStagePercent: largestStagePercent
-    })
-
-    const stageByName = Object.fromEntries(stageTimings.map(s => [s.name, s.totalMs]))
-    const primaryRoadId = bundle.primaryRoadResult?.proposedRoadCenterline?.properties?.roadId
-      ?? bundle.primaryRoadResult?.proposedRoadCenterline?.properties?.id
-      ?? null
-    console.log('[GenerationPerformanceCompletionAudit]', {
-      mcpi,
-      alternativeId: targetAlternativeId,
-      totalMs: totalTransactionMs,
-      stages: {
-        terrainSuitability: stageByName['terrainSuitability'] ?? 0,
-        primaryRoad: stageByName['primaryRoad'] ?? 0,
-        secondaryRoad: stageByName['secondaryRoad'] ?? 0,
-        opportunityBlocks: stageByName['opportunityBlocks'] ?? 0,
-        developmentProgram: stageByName['developmentProgram'] ?? 0,
-        localStreetEvaluation: stageByName['localStreetEvaluation'] ?? 0,
-        townhomeGeneration: stageByName['townhomeGeneration'] ?? 0,
-        baselineLayout: stageByName['baselineLayout'] ?? 0,
-        selectedFinalLayout: stageByName['selectedFinalLayout'] ?? 0,
-        alternatives: stageByName['alternatives'] ?? 0,
-        finalAssembly: stageByName['finalAssembly'] ?? 0
-      },
-      expensiveDiagnosticsEnabled: ENABLE_EXPENSIVE_PERFORMANCE_DIAGNOSTICS,
-      expensiveDiagnosticExecutionCount: 0,
-      cacheStats: counts,
-      resultFingerprint: {
-        primaryRoadId,
-        primaryRoadLengthFt: bundle.primaryRoadResult?.proposedRoadLengthFeet ?? 0,
-        secondaryRoadCount: bundle.secondaryRoadNetworkResult?.roads?.length ?? 0,
-        localStreetCount: bundle.localStreetNetworkResult?.localStreetCount ?? 0,
-        generatedUnits: (bundle.selectedFinalLayout?.lotCount ?? 0) + (bundle.townhomeGenerationResult?.unitCount ?? 0),
-        townhomeUnits: bundle.townhomeGenerationResult?.unitCount ?? 0,
-        opportunityBlockCount: bundle.developmentOpportunityBlockResult?.blocks?.length ?? 0
-      }
-    })
-
-    console.log('[TerrainLineQueryCacheAudit]', {
-      mcpi,
-      ...getTerrainLineQueryAudit()
-    })
-  }
 
   // Compute redevelopment impact for the final selected concept.
   bundle.redevelopmentImpact = computeRedevelopmentImpactMetrics(bundle, getActiveRedevelopmentContext())
 
+  console.log('[SubDivMaker Regression Fingerprint]', {
+    mcpi,
+    alternativeId: targetAlternativeId,
+    primaryRoadLengthFt: bundle.primaryRoadResult?.proposedRoadLengthFeet ?? 0,
+    primaryCoordinateCount: bundle.primaryRoadResult?.proposedRoadCenterline?.geometry?.coordinates?.length ?? 0,
+    secondaryRoadCount: bundle.secondaryRoadNetworkResult?.roads?.length ?? 0,
+    secondaryTotalLengthFt: bundle.secondaryRoadNetworkResult?.totalSecondaryRoadLengthFt ?? 0,
+    localStreetCount: bundle.localStreetNetworkResult?.localStreetCount ?? 0,
+    localTotalLengthFt: bundle.localStreetNetworkResult?.totalLocalStreetLengthFt ?? 0,
+    conceptualUnits: (bundle.selectedFinalLayout?.lotCount ?? 0) + (bundle.townhomeGenerationResult?.unitCount ?? 0),
+    servedAreaAcres: (bundle.primaryRoadResult?.servedDevelopableAreaSqFt ?? 0) / 43560,
+    totalRoadLengthFt: (bundle.primaryRoadResult?.proposedRoadLengthFeet ?? 0) + (bundle.secondaryRoadNetworkResult?.totalSecondaryRoadLengthFt ?? 0) + (bundle.localStreetNetworkResult?.totalLocalStreetLengthFt ?? 0),
+    developmentZoneCount: bundle.conceptualProgram?.zones?.length ?? 0,
+    townhomeRowCount: bundle.townhomeGenerationResult?.rowCount ?? 0,
+    redevelopmentImpactLevel: (bundle.redevelopmentImpact as any)?.impactLevel ?? null,
+    totalGenerationMs: totalTransactionMs,
+    stages: stageTimings,
+    largestStage: largestStage.name,
+    largestStageMs: largestStage.totalMs,
+    largestStagePercent
+  })
+
+  console.log('[SubDivMaker Downstream Regression Fingerprint]', {
+    mcpi,
+    alternativeId: targetAlternativeId,
+    primaryRoadLengthFt: bundle.primaryRoadResult?.proposedRoadLengthFeet ?? 0,
+    secondaryRoadCount: bundle.secondaryRoadNetworkResult?.roads?.length ?? 0,
+    secondaryTotalLengthFt: bundle.secondaryRoadNetworkResult?.totalSecondaryRoadLengthFt ?? 0,
+    localStreetCount: bundle.localStreetNetworkResult?.localStreetCount ?? 0,
+    localTotalLengthFt: bundle.localStreetNetworkResult?.totalLocalStreetLengthFt ?? 0,
+    developmentZoneCount: bundle.conceptualProgram?.zones?.length ?? 0,
+    developmentPadCount: bundle.selectedFinalLayout?.developmentPadCount ?? 0,
+    candidateOpenAreaAcres: (candidateOpenArea as any).candidateAreaAcres ?? (candidateOpenArea as any).candidateGeometry ? (bundle.primaryRoadResult?.servedDevelopableAreaSqFt ?? 0) / 43560 : null,
+    networkServedAreaAcres: (bundle.selectedFinalLayout?.layoutAreaAcres ?? 0) || ((bundle.primaryRoadResult?.servedDevelopableAreaSqFt ?? 0) / 43560),
+    townhomeFrontageRunCount: (townhomeResult as any)?.frontageRuns?.length ?? null,
+    townhomeRowCandidateCount: (townhomeResult as any)?.rowCandidates?.length ?? null,
+    townhomeRowCount: bundle.townhomeGenerationResult?.rowCount ?? 0,
+    townhomeUnitsAttempted: (townhomeResult as any)?.unitsAttempted ?? null,
+    townhomeUnitCount: bundle.townhomeGenerationResult?.unitCount ?? 0,
+    conceptualUnits: (bundle.selectedFinalLayout?.lotCount ?? 0) + (bundle.townhomeGenerationResult?.unitCount ?? 0),
+    townhomeRejectionReasons: (townhomeResult as any)?.rejectionReasons ?? {},
+    totalRoadLengthFt: (bundle.primaryRoadResult?.proposedRoadLengthFeet ?? 0) + (bundle.secondaryRoadNetworkResult?.totalSecondaryRoadLengthFt ?? 0) + (bundle.localStreetNetworkResult?.totalLocalStreetLengthFt ?? 0)
+  })
+
   return bundle
   } finally {
+    const pipCache = getActivePipCache()
+    if (pipCache) setActivePipCache(null)
     setActiveRedevelopmentContext(null)
   }
 }

@@ -1,4 +1,5 @@
 import * as turf from '@turf/turf'
+import { ENABLE_DEEP_GENERATION_PROFILING } from '../lib/perf'
 import type {
   TerrainSuitabilityResult,
   TerrainSuitabilityClass,
@@ -54,7 +55,11 @@ interface IndexedCell {
 
 interface CellIndex {
   cells: IndexedCell[]
+  cellByIndex: (IndexedCell | undefined)[]
   bbox: number[] | null
+  spatialGrid: Map<string, number[]>
+  gridSizeX: number
+  gridSizeY: number
 }
 
 const cellIndexCache = new WeakMap<TerrainSuitabilityResult, CellIndex>()
@@ -97,6 +102,101 @@ export function resetTerrainLineQueryCache(): void {
   terrainLineQueryMsAvoided = 0
   terrainCellIndexBuildCount = 0
   terrainCellIndexBuiltSet.clear()
+}
+
+// Pass 11 lightweight terrain query counters
+let terrainGeometryQueries = 0
+let terrainPointQueries = 0
+let terrainSpatialIndexQueries = 0
+let terrainSpatialIndexCandidateCells = 0
+let terrainLegacyFullScanFallbacks = 0
+let terrainCellsAvailable = 0
+let terrainCellsActuallyTested = 0
+let terrainCellsSkippedBySpatialIndex = 0
+let terrainGeometryValidationCount = 0
+let terrainPointValidationCount = 0
+const TERRAIN_GEOMETRY_VALIDATION_LIMIT = 5
+const TERRAIN_POINT_VALIDATION_LIMIT = 10
+
+const terrainGeometryQueryByCaller: Record<string, number> = {}
+const terrainPointQueryByCaller: Record<string, number> = {}
+const terrainLineQueryByCaller: Record<string, number> = {}
+
+function recordGeometryQuery(caller = 'unknown') {
+  terrainGeometryQueries++
+  terrainGeometryQueryByCaller[caller] = (terrainGeometryQueryByCaller[caller] || 0) + 1
+}
+
+function recordPointQuery(caller = 'unknown') {
+  terrainPointQueries++
+  terrainPointQueryByCaller[caller] = (terrainPointQueryByCaller[caller] || 0) + 1
+}
+
+function recordLineQuery(caller = 'unknown') {
+  terrainLineQueryByCaller[caller] = (terrainLineQueryByCaller[caller] || 0) + 1
+}
+
+export function resetTerrainQueryCounters(): void {
+  terrainGeometryQueries = 0
+  terrainPointQueries = 0
+  terrainSpatialIndexQueries = 0
+  terrainSpatialIndexCandidateCells = 0
+  terrainLegacyFullScanFallbacks = 0
+  terrainCellsAvailable = 0
+  terrainCellsActuallyTested = 0
+  terrainCellsSkippedBySpatialIndex = 0
+  terrainGeometryValidationCount = 0
+  terrainPointValidationCount = 0
+  for (const k of Object.keys(terrainGeometryQueryByCaller)) delete terrainGeometryQueryByCaller[k]
+  for (const k of Object.keys(terrainPointQueryByCaller)) delete terrainPointQueryByCaller[k]
+  for (const k of Object.keys(terrainLineQueryByCaller)) delete terrainLineQueryByCaller[k]
+}
+
+export function getTerrainQueryCounters(): {
+  terrainGeometryQueries: number
+  terrainPointQueries: number
+  terrainLineQueries: number
+  terrainSpatialIndexQueries: number
+  terrainSpatialIndexCandidateCells: number
+  terrainLegacyFullScanFallbacks: number
+  terrainCellsAvailable: number
+  terrainCellsActuallyTested: number
+  terrainCellsSkippedBySpatialIndex: number
+  terrainCellIndexBuildCount: number
+  geometryQueryByCaller: Record<string, number>
+  pointQueryByCaller: Record<string, number>
+  lineQueryByCaller: Record<string, number>
+} {
+  return {
+    terrainGeometryQueries,
+    terrainPointQueries,
+    terrainLineQueries: terrainLineQueryRequests,
+    terrainSpatialIndexQueries,
+    terrainSpatialIndexCandidateCells,
+    terrainLegacyFullScanFallbacks,
+    terrainCellsAvailable,
+    terrainCellsActuallyTested,
+    terrainCellsSkippedBySpatialIndex,
+    terrainCellIndexBuildCount,
+    geometryQueryByCaller: { ...terrainGeometryQueryByCaller },
+    pointQueryByCaller: { ...terrainPointQueryByCaller },
+    lineQueryByCaller: { ...terrainLineQueryByCaller }
+  }
+}
+
+export function getTerrainCellIndexInfo(terrainSuitability: TerrainSuitabilityResult | null | undefined): {
+  cellIndexExists: boolean
+  cellCount: number
+  spatialGridSize: number
+  bbox: number[] | null
+} {
+  const index = buildCellIndex(terrainSuitability)
+  return {
+    cellIndexExists: !!index,
+    cellCount: index ? index.cells.length : 0,
+    spatialGridSize: index ? index.spatialGrid.size : 0,
+    bbox: index ? index.bbox : null
+  }
 }
 
 function ensureFeature(
@@ -143,6 +243,7 @@ function buildCellIndex(terrainSuitability: TerrainSuitabilityResult | null | un
 
   const indexed: IndexedCell[] = []
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  let totalWidth = 0, totalHeight = 0
 
   for (let i = 0; i < cells.length; i++) {
     const feature = cells[i] as unknown as GeoJSON.Feature<
@@ -155,6 +256,8 @@ function buildCellIndex(terrainSuitability: TerrainSuitabilityResult | null | un
     const areaM2 = safeTurfOp(() => turf.area(feature), 0)
     if (areaM2 <= 0) continue
     indexed.push({ feature, index: i, bbox, areaM2 })
+    totalWidth += bbox[2] - bbox[0]
+    totalHeight += bbox[3] - bbox[1]
 
     minX = Math.min(minX, bbox[0])
     minY = Math.min(minY, bbox[1])
@@ -163,8 +266,34 @@ function buildCellIndex(terrainSuitability: TerrainSuitabilityResult | null | un
   }
 
   if (indexed.length === 0) return null
-  const bbox = indexed.length > 0 ? [minX, minY, maxX, maxY] : null
-  const index: CellIndex = { cells: indexed, bbox }
+  const bbox = [minX, minY, maxX, maxY]
+  const cellByIndex: (IndexedCell | undefined)[] = new Array(cells.length)
+  for (const c of indexed) cellByIndex[c.index] = c
+
+  // Grid cell dimensions based on average terrain cell size to keep the
+  // coarse lookup conservative but compact.
+  const avgWidth = totalWidth / indexed.length
+  const avgHeight = totalHeight / indexed.length
+  const gridSizeX = avgWidth > 0 ? avgWidth : 1
+  const gridSizeY = avgHeight > 0 ? avgHeight : 1
+  const spatialGrid = new Map<string, number[]>()
+
+  for (const c of indexed) {
+    const minGx = Math.floor(c.bbox[0] / gridSizeX)
+    const maxGx = Math.ceil(c.bbox[2] / gridSizeX)
+    const minGy = Math.floor(c.bbox[1] / gridSizeY)
+    const maxGy = Math.ceil(c.bbox[3] / gridSizeY)
+    for (let gx = minGx; gx <= maxGx; gx++) {
+      for (let gy = minGy; gy <= maxGy; gy++) {
+        const key = `${gx},${gy}`
+        const list = spatialGrid.get(key) ?? []
+        if (list.length === 0) spatialGrid.set(key, list)
+        list.push(c.index)
+      }
+    }
+  }
+
+  const index: CellIndex = { cells: indexed, cellByIndex, bbox, spatialGrid, gridSizeX, gridSizeY }
   cellIndexCache.set(terrainSuitability, index)
   if (!terrainCellIndexBuiltSet.has(terrainSuitability)) {
     terrainCellIndexBuiltSet.add(terrainSuitability)
@@ -173,60 +302,45 @@ function buildCellIndex(terrainSuitability: TerrainSuitabilityResult | null | un
   return index
 }
 
-function bboxIntersects(a: number[], b: number[]): boolean {
-  if (!a || !b || a.length < 4 || b.length < 4) return true
-  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]
-}
+function getCandidatesFromGrid(index: CellIndex, queryBbox: number[]): IndexedCell[] | null {
+  if (!queryBbox || queryBbox.length < 4) return null
+  if (index.spatialGrid.size === 0) return null
 
-function pointInBbox(point: GeoJSON.Feature<GeoJSON.Point>, bbox: number[]): boolean {
-  if (!bbox || bbox.length < 4) return true
-  const [x, y] = point.geometry.coordinates
-  return x >= bbox[0] && x <= bbox[2] && y >= bbox[1] && y <= bbox[3]
-}
+  const minGx = Math.floor(queryBbox[0] / index.gridSizeX)
+  const maxGx = Math.ceil(queryBbox[2] / index.gridSizeX)
+  const minGy = Math.floor(queryBbox[1] / index.gridSizeY)
+  const maxGy = Math.ceil(queryBbox[3] / index.gridSizeY)
 
-function resolveDominantClass(
-  percentages: Record<TerrainSuitabilityClass, number>
-): TerrainSuitabilityClass {
-  let dominant: TerrainSuitabilityClass = 'INSUFFICIENT_DATA'
-  let best = -1
-  for (const cls of TERRAIN_CLASS_SEVERITY) {
-    const pct = percentages[cls]
-    if (pct > best || (pct === best && SEVERITY_RANK[cls] > SEVERITY_RANK[dominant])) {
-      best = pct
-      dominant = cls
+  const seen = new Set<number>()
+  const candidateIndices: number[] = []
+  for (let gx = minGx; gx <= maxGx; gx++) {
+    for (let gy = minGy; gy <= maxGy; gy++) {
+      const list = index.spatialGrid.get(`${gx},${gy}`)
+      if (!list) continue
+      for (const idx of list) {
+        if (seen.has(idx)) continue
+        seen.add(idx)
+        candidateIndices.push(idx)
+      }
     }
   }
-  return best > 0 ? dominant : 'INSUFFICIENT_DATA'
+
+  if (candidateIndices.length === 0) return null
+  candidateIndices.sort((a, b) => a - b)
+  return candidateIndices.map(idx => index.cellByIndex[idx]).filter((c): c is IndexedCell => c !== undefined)
 }
 
-function emptyPointResult(): TerrainPointQueryResult {
-  return {
-    available: false,
-    class: 'INSUFFICIENT_DATA',
-    slopePct: null,
-    elevationFt: null,
-    confidence: null,
-    sourceCellIndex: null
-  }
-}
-
-export function getTerrainSuitabilityAtPoint(
-  point: GeoJSON.Feature<GeoJSON.Point> | GeoJSON.Point | number[],
-  terrainSuitability: TerrainSuitabilityResult | null | undefined
+function evaluatePointForCells(
+  pt: GeoJSON.Feature<GeoJSON.Point>,
+  cells: IndexedCell[]
 ): TerrainPointQueryResult {
-  const pt = ensurePointFeature(point)
-  if (!pt) return emptyPointResult()
-
-  const index = buildCellIndex(terrainSuitability)
-  if (!index) return emptyPointResult()
-
-  if (index.bbox && !pointInBbox(pt, index.bbox)) {
-    return emptyPointResult()
-  }
-
-  for (const cell of index.cells) {
+  for (const cell of cells) {
     if (!pointInBbox(pt, cell.bbox)) continue
-    const inside = safeTurfOp(() => turf.booleanPointInPolygon(pt as any, cell.feature as any), false)
+    const inside = safeTurfOp(
+      () => turf.booleanPointInPolygon(pt as any, cell.feature as any),
+      false
+    )
+    terrainCellsActuallyTested++
     if (inside) {
       const props = cell.feature.properties
       return {
@@ -239,83 +353,15 @@ export function getTerrainSuitabilityAtPoint(
       }
     }
   }
-
   return emptyPointResult()
 }
 
-export function getTerrainSuitabilityForGeometry(
-  geometry: GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.Geometry,
-  terrainSuitability: TerrainSuitabilityResult | null | undefined
+function evaluateGeometryForCells(
+  feature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+  totalAreaM2: number,
+  targetBbox: number[] | null,
+  cells: IndexedCell[]
 ): TerrainGeometryQueryResult {
-  const feature = ensureFeature(geometry)
-  if (!feature?.geometry) {
-    return {
-      available: false,
-      preferredPercent: 0,
-      moderatePercent: 0,
-      challengingPercent: 0,
-      avoidPercent: 0,
-      insufficientDataPercent: 100,
-      dominantClass: 'INSUFFICIENT_DATA',
-      meanSlopePct: null,
-      maxSlopePct: null,
-      sampledCellCount: 0,
-      intersectedCellCount: 0
-    }
-  }
-
-  if (feature.geometry.type === 'LineString') {
-    const lineResult = getTerrainSuitabilityForLine(feature as any, terrainSuitability)
-    return {
-      available: lineResult.available,
-      preferredPercent: round3(lineResult.preferredFraction * 100),
-      moderatePercent: round3(lineResult.moderateFraction * 100),
-      challengingPercent: round3(lineResult.challengingFraction * 100),
-      avoidPercent: round3(lineResult.avoidFraction * 100),
-      insufficientDataPercent: round3(lineResult.insufficientDataFraction * 100),
-      dominantClass: lineResult.dominantClass,
-      meanSlopePct: lineResult.meanSlopePct,
-      maxSlopePct: lineResult.maxSlopePct,
-      sampledCellCount: lineResult.sampleCount,
-      intersectedCellCount: lineResult.sampleCount
-    }
-  }
-
-  const index = buildCellIndex(terrainSuitability)
-  if (!index || (feature.geometry.type !== 'Polygon' && feature.geometry.type !== 'MultiPolygon')) {
-    return {
-      available: false,
-      preferredPercent: 0,
-      moderatePercent: 0,
-      challengingPercent: 0,
-      avoidPercent: 0,
-      insufficientDataPercent: 100,
-      dominantClass: 'INSUFFICIENT_DATA',
-      meanSlopePct: null,
-      maxSlopePct: null,
-      sampledCellCount: 0,
-      intersectedCellCount: 0
-    }
-  }
-
-  const totalAreaM2 = safeTurfOp(() => turf.area(feature), 0)
-  if (totalAreaM2 <= 0) {
-    return {
-      available: false,
-      preferredPercent: 0,
-      moderatePercent: 0,
-      challengingPercent: 0,
-      avoidPercent: 0,
-      insufficientDataPercent: 100,
-      dominantClass: 'INSUFFICIENT_DATA',
-      meanSlopePct: null,
-      maxSlopePct: null,
-      sampledCellCount: 0,
-      intersectedCellCount: 0
-    }
-  }
-
-  const targetBbox = safeTurfOp(() => turf.bbox(feature) as number[], null)
   const classAreaM2: Record<TerrainSuitabilityClass, number> = {
     PREFERRED: 0,
     MODERATE: 0,
@@ -330,9 +376,10 @@ export function getTerrainSuitabilityForGeometry(
   let sampledCellCount = 0
   let intersectedCellCount = 0
 
-  for (const cell of index.cells) {
-    if (!targetBbox || !bboxIntersects(cell.bbox, targetBbox)) continue
+  for (const cell of cells) {
+    if (targetBbox && !bboxIntersects(cell.bbox, targetBbox)) continue
     sampledCellCount++
+    terrainCellsActuallyTested++
 
     const overlap = safeTurfOp(
       () => (turf.intersect as any)(turf.featureCollection([cell.feature as any, feature as any]) as any) as GeoJSON.Feature<GeoJSON.Geometry> | null,
@@ -390,11 +437,224 @@ export function getTerrainSuitabilityForGeometry(
   }
 }
 
+function bboxIntersects(a: number[], b: number[]): boolean {
+  if (!a || !b || a.length < 4 || b.length < 4) return true
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1]
+}
+
+function pointInBbox(point: GeoJSON.Feature<GeoJSON.Point>, bbox: number[]): boolean {
+  if (!bbox || bbox.length < 4) return true
+  const [x, y] = point.geometry.coordinates
+  return x >= bbox[0] && x <= bbox[2] && y >= bbox[1] && y <= bbox[3]
+}
+
+function resolveDominantClass(
+  percentages: Record<TerrainSuitabilityClass, number>
+): TerrainSuitabilityClass {
+  let dominant: TerrainSuitabilityClass = 'INSUFFICIENT_DATA'
+  let best = -1
+  for (const cls of TERRAIN_CLASS_SEVERITY) {
+    const pct = percentages[cls]
+    if (pct > best || (pct === best && SEVERITY_RANK[cls] > SEVERITY_RANK[dominant])) {
+      best = pct
+      dominant = cls
+    }
+  }
+  return best > 0 ? dominant : 'INSUFFICIENT_DATA'
+}
+
+function emptyPointResult(): TerrainPointQueryResult {
+  return {
+    available: false,
+    class: 'INSUFFICIENT_DATA',
+    slopePct: null,
+    elevationFt: null,
+    confidence: null,
+    sourceCellIndex: null
+  }
+}
+
+export function getTerrainSuitabilityAtPoint(
+  point: GeoJSON.Feature<GeoJSON.Point> | GeoJSON.Point | number[],
+  terrainSuitability: TerrainSuitabilityResult | null | undefined,
+  caller = 'unknown'
+): TerrainPointQueryResult {
+  recordPointQuery(caller)
+  const pt = ensurePointFeature(point)
+  if (!pt) return emptyPointResult()
+
+  const index = buildCellIndex(terrainSuitability)
+  if (!index) return emptyPointResult()
+  terrainCellsAvailable += index.cells.length
+
+  if (index.bbox && !pointInBbox(pt, index.bbox)) {
+    return emptyPointResult()
+  }
+
+  const [x, y] = pt.geometry.coordinates
+  const pointBbox = [x, y, x, y]
+  const candidates = getCandidatesFromGrid(index, pointBbox)
+  let cellsToTest: IndexedCell[]
+  if (candidates) {
+    terrainSpatialIndexQueries++
+    terrainSpatialIndexCandidateCells += candidates.length
+    terrainCellsSkippedBySpatialIndex += index.cells.length - candidates.length
+    cellsToTest = candidates
+  } else {
+    terrainLegacyFullScanFallbacks++
+    cellsToTest = index.cells
+  }
+
+  const result = evaluatePointForCells(pt, cellsToTest)
+
+  if (import.meta.env.DEV && terrainPointValidationCount < TERRAIN_POINT_VALIDATION_LIMIT) {
+    terrainPointValidationCount++
+    const legacy = evaluatePointForCells(pt, index.cells)
+    if (
+      legacy.available !== result.available ||
+      legacy.class !== result.class ||
+      legacy.sourceCellIndex !== result.sourceCellIndex ||
+      legacy.slopePct !== result.slopePct
+    ) {
+      console.error('[TerrainSpatialIndexMismatch]', {
+        queryType: 'point',
+        optimized: result,
+        legacy,
+        point: pt.geometry.coordinates,
+        candidateCount: cellsToTest.length,
+        legacyCount: index.cells.length
+      })
+    }
+  }
+
+  return result
+}
+
+export function getTerrainSuitabilityForGeometry(
+  geometry: GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.Geometry,
+  terrainSuitability: TerrainSuitabilityResult | null | undefined,
+  caller = 'unknown'
+): TerrainGeometryQueryResult {
+  recordGeometryQuery(caller)
+  const feature = ensureFeature(geometry)
+  if (!feature?.geometry) {
+    return {
+      available: false,
+      preferredPercent: 0,
+      moderatePercent: 0,
+      challengingPercent: 0,
+      avoidPercent: 0,
+      insufficientDataPercent: 100,
+      dominantClass: 'INSUFFICIENT_DATA',
+      meanSlopePct: null,
+      maxSlopePct: null,
+      sampledCellCount: 0,
+      intersectedCellCount: 0
+    }
+  }
+
+  if (feature.geometry.type === 'LineString') {
+    const lineResult = getTerrainSuitabilityForLine(feature as any, terrainSuitability, caller)
+    return {
+      available: lineResult.available,
+      preferredPercent: round3(lineResult.preferredFraction * 100),
+      moderatePercent: round3(lineResult.moderateFraction * 100),
+      challengingPercent: round3(lineResult.challengingFraction * 100),
+      avoidPercent: round3(lineResult.avoidFraction * 100),
+      insufficientDataPercent: round3(lineResult.insufficientDataFraction * 100),
+      dominantClass: lineResult.dominantClass,
+      meanSlopePct: lineResult.meanSlopePct,
+      maxSlopePct: lineResult.maxSlopePct,
+      sampledCellCount: lineResult.sampleCount,
+      intersectedCellCount: lineResult.sampleCount
+    }
+  }
+
+  const index = buildCellIndex(terrainSuitability)
+  if (!index || (feature.geometry.type !== 'Polygon' && feature.geometry.type !== 'MultiPolygon')) {
+    return {
+      available: false,
+      preferredPercent: 0,
+      moderatePercent: 0,
+      challengingPercent: 0,
+      avoidPercent: 0,
+      insufficientDataPercent: 100,
+      dominantClass: 'INSUFFICIENT_DATA',
+      meanSlopePct: null,
+      maxSlopePct: null,
+      sampledCellCount: 0,
+      intersectedCellCount: 0
+    }
+  }
+
+  terrainCellsAvailable += index.cells.length
+
+  const totalAreaM2 = safeTurfOp(() => turf.area(feature), 0)
+  if (totalAreaM2 <= 0) {
+    return {
+      available: false,
+      preferredPercent: 0,
+      moderatePercent: 0,
+      challengingPercent: 0,
+      avoidPercent: 0,
+      insufficientDataPercent: 100,
+      dominantClass: 'INSUFFICIENT_DATA',
+      meanSlopePct: null,
+      maxSlopePct: null,
+      sampledCellCount: 0,
+      intersectedCellCount: 0
+    }
+  }
+
+  const targetBbox = safeTurfOp(() => turf.bbox(feature) as number[], null)
+  const candidates = targetBbox ? getCandidatesFromGrid(index, targetBbox) : null
+  let cellsToTest: IndexedCell[]
+  if (candidates) {
+    terrainSpatialIndexQueries++
+    terrainSpatialIndexCandidateCells += candidates.length
+    terrainCellsSkippedBySpatialIndex += index.cells.length - candidates.length
+    cellsToTest = candidates
+  } else {
+    terrainLegacyFullScanFallbacks++
+    cellsToTest = index.cells
+  }
+
+  const typedFeature = feature as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>
+  const result = evaluateGeometryForCells(typedFeature, totalAreaM2, targetBbox, cellsToTest)
+
+  if (import.meta.env.DEV && terrainGeometryValidationCount < TERRAIN_GEOMETRY_VALIDATION_LIMIT) {
+    terrainGeometryValidationCount++
+    const legacy = evaluateGeometryForCells(typedFeature, totalAreaM2, targetBbox, index.cells)
+    if (
+      legacy.preferredPercent !== result.preferredPercent ||
+      legacy.moderatePercent !== result.moderatePercent ||
+      legacy.challengingPercent !== result.challengingPercent ||
+      legacy.avoidPercent !== result.avoidPercent ||
+      legacy.insufficientDataPercent !== result.insufficientDataPercent ||
+      legacy.dominantClass !== result.dominantClass ||
+      legacy.meanSlopePct !== result.meanSlopePct ||
+      legacy.maxSlopePct !== result.maxSlopePct
+    ) {
+      console.error('[TerrainSpatialIndexMismatch]', {
+        queryType: 'geometry',
+        optimized: result,
+        legacy,
+        targetBbox,
+        candidateCount: cellsToTest.length,
+        legacyCount: index.cells.length
+      })
+    }
+  }
+
+  return result
+}
+
 export function computeTerrainPlacementEvaluation(
   geometry: GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.Geometry,
-  terrainSuitability: TerrainSuitabilityResult | null | undefined
+  terrainSuitability: TerrainSuitabilityResult | null | undefined,
+  caller = 'unknown'
 ): TerrainPlacementEvaluation {
-  const q = getTerrainSuitabilityForGeometry(geometry, terrainSuitability)
+  const q = getTerrainSuitabilityForGeometry(geometry, terrainSuitability, caller)
   if (!q.available) {
     return {
       available: false,
@@ -447,9 +707,12 @@ const TERRAIN_ROAD_MAX_TOTAL_PENALTY = 0.70
 
 export function computeRoadTerrainScore(
   line: GeoJSON.Feature<GeoJSON.LineString> | GeoJSON.LineString,
-  terrainSuitability: TerrainSuitabilityResult | null | undefined
+  terrainSuitability: TerrainSuitabilityResult | null | undefined,
+  caller = 'unknown'
 ): PrimaryRoadTerrainScoring {
-  const q0 = performance.now()
+  recordLineQuery(caller)
+  const timingEnabled = ENABLE_DEEP_GENERATION_PROFILING
+  const q0 = timingEnabled ? performance.now() : 0
   let lineSignature: string | null = null
   terrainLineQueryRequests++
   if (terrainSuitability) {
@@ -462,13 +725,13 @@ export function computeRoadTerrainScore(
     const cached = perTerrain.get(lineSignature)
     if (cached) {
       terrainLineQueryCacheHits++
-      terrainLineQueryMsAvoided += cached.queryMs ?? 0
+      if (timingEnabled) terrainLineQueryMsAvoided += cached.queryMs ?? 0
       return cached
     }
   }
 
-  const lineResult = getTerrainSuitabilityForLine(line, terrainSuitability)
-  const queryMs = round3(performance.now() - q0)
+  const lineResult = getTerrainSuitabilityForLine(line, terrainSuitability, caller)
+  const queryMs = timingEnabled ? round3(performance.now() - q0) : 0
   if (!lineResult.available) {
     const result: PrimaryRoadTerrainScoring = {
       available: false,
@@ -556,7 +819,8 @@ export const computePrimaryRoadTerrainScore = computeRoadTerrainScore
 
 export function getTerrainSuitabilityForLine(
   line: GeoJSON.Feature<GeoJSON.LineString> | GeoJSON.LineString,
-  terrainSuitability: TerrainSuitabilityResult | null | undefined
+  terrainSuitability: TerrainSuitabilityResult | null | undefined,
+  caller = 'unknown'
 ): TerrainLineQueryResult {
   const feature = ensureFeature({ type: 'LineString', coordinates: (line as any).coordinates } as GeoJSON.LineString)
   if (!feature) {
@@ -658,7 +922,7 @@ export function getTerrainSuitabilityForLine(
       counts.INSUFFICIENT_DATA++
       continue
     }
-    const query = getTerrainSuitabilityAtPoint(pt, terrainSuitability)
+    const query = getTerrainSuitabilityAtPoint(pt, terrainSuitability, caller)
     if (!query.available) {
       counts.INSUFFICIENT_DATA++
       continue

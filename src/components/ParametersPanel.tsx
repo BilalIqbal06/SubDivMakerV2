@@ -479,6 +479,37 @@ function ParametersPanel({
     // Update ref to track that we've handled this version
     lastHandledDraftRestoreVersionRef.current = draftRestoreVersion
 
+    const draftDevProgram = (draftParametersToRestore?.developmentProgram || [])
+      .filter((u: any) => u?.enabled)
+      .map((u: any) => `${u?.useType}:${u?.priority}`)
+    console.log('[SubDivMaker Draft Restore Audit]', {
+      draftMCPI,
+      currentMCPI,
+      draftRestoreVersion,
+      normalizedMCPI: normalizedDraftMCPI,
+      draftTimestamp: draftParametersToRestore?.updatedAt ?? null,
+      restoredFields: Object.keys(draftParametersToRestore || {}),
+      projectMode: draftParametersToRestore?.projectMode ?? null,
+      developmentApproach: draftParametersToRestore?.developmentApproach ?? null,
+      developmentProgramEnabled: draftDevProgram,
+      targetDensity: draftParametersToRestore?.zoningAndLots?.targetDensity ?? null,
+      minLotArea: draftParametersToRestore?.zoningAndLots?.minLotArea ?? null,
+      preferredLotSize: (draftParametersToRestore?.zoningAndLots as any)?.preferredLotSize ?? null,
+      rightOfWayWidth: draftParametersToRestore?.roads?.rightOfWayWidth ?? null,
+      pavementWidth: draftParametersToRestore?.roads?.pavementWidth ?? null,
+      networkPreference: draftParametersToRestore?.roads?.networkPreference ?? null,
+      buildingTreatment: draftParametersToRestore?.existingFeatures?.buildingTreatment ?? null,
+      pavementTreatment: draftParametersToRestore?.existingFeatures?.roadTreatment ?? null,
+      avoidSteepSlopes: draftParametersToRestore?.terrainConstraints?.avoidSteepSlopes ?? null,
+      avoidWetlands: draftParametersToRestore?.terrainConstraints?.avoidWetlands ?? null,
+      avoidStreams: draftParametersToRestore?.terrainConstraints?.avoidStreams ?? null,
+      preserveExistingDevelopment: draftParametersToRestore?.priorities?.preserveExistingDevelopment ?? null,
+      maxUnitYield: draftParametersToRestore?.priorities?.maxUnitYield ?? null,
+      amenitiesStreamBuffer: draftParametersToRestore?.amenities?.streamBuffer ?? null,
+      amenitiesWetlandBuffer: draftParametersToRestore?.amenities?.wetlandBuffer ?? null,
+      hasSchemaVersion: !!(draftParametersToRestore as any)?.schemaVersion
+    })
+
     // Normalize the draft parameters for editor
     const normalizedParameters = normalizeDraftParametersForEditor(draftParametersToRestore)
 

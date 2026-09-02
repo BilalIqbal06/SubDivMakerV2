@@ -138,7 +138,7 @@ function App() {
 
     if (import.meta.env.DEV) {
       const elapsedMsSinceParcelSelected = parcelSelectedAtRef.current ? Date.now() - parcelSelectedAtRef.current : 0
-      console.log('[ParcelScreeningReadinessAudit]', {
+      0 as any && console.log('[ParcelScreeningReadinessAudit]', {
         mcpi,
         ready,
         buildingsState: existingConditions?.buildings?.state ?? null,
@@ -179,7 +179,7 @@ function App() {
     if (!ready) {
       setParcelFeasibilityAssessment(null)
       if (VERBOSE_GIS_DIAGNOSTICS) {
-        console.log('[ParcelScreeningStabilityAudit]', {
+        0 as any && console.log('[ParcelScreeningStabilityAudit]', {
           mcpi,
           analysisRunId: currentAnalysisRunIdRef.current,
           parcelScreeningReady: false,
@@ -218,7 +218,7 @@ function App() {
     setParcelFeasibilityAssessment(assessment)
 
     if (VERBOSE_GIS_DIAGNOSTICS) {
-      console.log('[ParcelScreeningStabilityAudit]', {
+      0 as any && console.log('[ParcelScreeningStabilityAudit]', {
         mcpi,
         analysisRunId: currentAnalysisRunIdRef.current,
         parcelScreeningReady: true,
@@ -353,7 +353,7 @@ function App() {
     setCurrentStep('select')
 
     if (VERBOSE_GIS_DIAGNOSTICS) {
-      console.log('[WorkflowReset]', {
+      0 as any && console.log('[WorkflowReset]', {
         reason,
         workflowRunId: nextResetVersion,
         previousMcpi,
@@ -913,11 +913,11 @@ function App() {
     // Development logging for analysis completion
     if (VERBOSE_GIS_DIAGNOSTICS) {
       if (result?.status === 'loaded') {
-        console.log('[App] Analysis successfully loaded', { mcpi: result.mcpi, runId, status: result.status })
+        0 as any && console.log('[App] Analysis successfully loaded', { mcpi: result.mcpi, runId, status: result.status })
       } else if (result) {
-        console.log('[App] Analysis finished without success', { mcpi: result.mcpi, runId, status: result.status, errors: result.errors })
+        0 as any && console.log('[App] Analysis finished without success', { mcpi: result.mcpi, runId, status: result.status, errors: result.errors })
       } else {
-        console.log('[App] Analysis inputs not ready; result discarded', { runId })
+        0 as any && console.log('[App] Analysis inputs not ready; result discarded', { runId })
       }
     }
   }
@@ -1129,12 +1129,12 @@ function App() {
 
   const commitAuthoritativeConceptResult = (bundle: AuthoritativeConceptResult, runId: number, controller: AbortController) => {
     if (controller.signal.aborted) {
-      if (VERBOSE_GIS_DIAGNOSTICS) console.log('[AuthoritativeConcept] commit skipped: aborted', { runId })
+      if (VERBOSE_GIS_DIAGNOSTICS) 0 as any && console.log('[AuthoritativeConcept] commit skipped: aborted', { runId })
       setGenerationStatus('aborted')
       return
     }
     if (runId !== currentRoadGenerationRunIdRef.current) {
-      if (VERBOSE_GIS_DIAGNOSTICS) console.log('[AuthoritativeConcept] commit skipped: stale', { runId, current: currentRoadGenerationRunIdRef.current })
+      if (VERBOSE_GIS_DIAGNOSTICS) 0 as any && console.log('[AuthoritativeConcept] commit skipped: stale', { runId, current: currentRoadGenerationRunIdRef.current })
       return
     }
     activateAuthoritativeConcept(bundle, bundle.authoritativeAlternativeId)
@@ -1179,6 +1179,31 @@ function App() {
       setRoadGenerationError('Candidate Open Area does not match the selected parcel.')
       return
     }
+
+    const canonicalDevTypes = (canonicalProjectParametersRef.current?.developmentProgram || [])
+      .filter((u: any) => u?.enabled)
+      .map((u: any) => u?.useType)
+    const submittedDevTypes = (submittedParameters?.parameters?.developmentProgram || [])
+      .filter((u: any) => u?.enabled)
+      .map((u: any) => u?.useType)
+    const canonicalTargetDensity = canonicalProjectParametersRef.current?.zoningAndLots?.targetDensity ?? null
+    const submittedTargetDensity = submittedParameters?.parameters?.zoningAndLots?.targetDensity ?? null
+
+    0 as any && console.log('[SubDivMaker Generate Button Click]', {
+      mcpi: currentMCPI,
+      strategy: targetAlternativeId,
+      analysisRunId: candidateOpenAreaResult.analysisRunId,
+      timestamp: new Date().toISOString(),
+      parameterSource: canonicalProjectParametersRef.current ? 'canonical-ref' : 'submitted-parameters',
+      canonicalRefPresent: !!canonicalProjectParametersRef.current,
+      submittedParametersPresent: !!submittedParameters,
+      canonicalTargetDensity,
+      submittedTargetDensity,
+      targetDensitiesMatch: canonicalTargetDensity === submittedTargetDensity,
+      canonicalDevelopmentProgram: canonicalDevTypes,
+      submittedDevelopmentProgram: submittedDevTypes,
+      developmentProgramsMatch: JSON.stringify(canonicalDevTypes) === JSON.stringify(submittedDevTypes)
+    })
 
     if (roadGenerationAbortControllerRef.current) {
       roadGenerationAbortControllerRef.current.abort()
@@ -1309,7 +1334,7 @@ function App() {
       setDevelopmentOpportunityBlockResult(null)
 
       if (VERBOSE_GIS_DIAGNOSTICS) {
-        console.log('[DraftLoad]', {
+        0 as any && console.log('[DraftLoad]', {
           draftId: draft.draftId,
           mcpi: draft.mcpi,
           parameterSource: 'explicit-draft'
@@ -1742,14 +1767,14 @@ function App() {
     
 
     if (VERBOSE_GIS_DIAGNOSTICS) {
-      console.log('[TownhomeFrontageAudit]', a.frontageAudit)
-      console.log('[TownhomeRowAdjacencyAudit]', a.adjacencyAudit)
-      console.log('[TownhomeCandidateRankingAudit]', a.rankingAudit)
-      console.log('[TownhomeRoadHierarchyAudit]', a.roadHierarchyAudit)
-      console.log('[TownhomeTerrainAudit]', a.terrainAudit)
-      console.log('[TownhomeAcceptanceRateAudit]', a.acceptanceRateAudit)
-      console.log('[TownhomeRowGroupAudit]', a.rowGroups)
-      console.log('[TownhomeVisualSanitySummary]', a.visualSanitySummary)
+      0 as any && console.log('[TownhomeFrontageAudit]', a.frontageAudit)
+      0 as any && console.log('[TownhomeRowAdjacencyAudit]', a.adjacencyAudit)
+      0 as any && console.log('[TownhomeCandidateRankingAudit]', a.rankingAudit)
+      0 as any && console.log('[TownhomeRoadHierarchyAudit]', a.roadHierarchyAudit)
+      0 as any && console.log('[TownhomeTerrainAudit]', a.terrainAudit)
+      0 as any && console.log('[TownhomeAcceptanceRateAudit]', a.acceptanceRateAudit)
+      0 as any && console.log('[TownhomeRowGroupAudit]', a.rowGroups)
+      0 as any && console.log('[TownhomeVisualSanitySummary]', a.visualSanitySummary)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -1820,9 +1845,9 @@ function App() {
     
 
     if (VERBOSE_GIS_DIAGNOSTICS) {
-      console.log('[TurfOperationAudit]', turfCounter.get())
-      console.log('[TurfByStageAudit]', turfCounter.getByStage())
-      console.log('[BooleanPipCallerAudit]', turfCounter.getByCaller())
+      0 as any && console.log('[TurfOperationAudit]', turfCounter.get())
+      0 as any && console.log('[TurfByStageAudit]', turfCounter.getByStage())
+      0 as any && console.log('[BooleanPipCallerAudit]', turfCounter.getByCaller())
     }
     const ordered = ['analyzeClick', 'existingConditionsReady', 'primaryRoadReady', 'secondaryRoadReady', 'developmentOpportunityReady', 'programReady', 'baselineLayoutReady', 'localStreetReady', 'selectedFinalLayoutReady', 'townhomeReady', 'mapLayersReady', 'workflowReady']
     if (VERBOSE_GIS_DIAGNOSTICS) {
@@ -1842,7 +1867,7 @@ function App() {
       const cumulativeMeasuredGeneratorMs = round2(generationPerformance.getTotalMs())
       const unaccountedWallClockMs = round2(Math.max(0, totalWallClockMs - cumulativeMeasuredGeneratorMs))
 
-      console.log('[EndToEndWorkflowAudit]', {
+      0 as any && console.log('[EndToEndWorkflowAudit]', {
         workflowRunId,
         mcpi,
         durations,
@@ -1853,7 +1878,7 @@ function App() {
         unaccountedWallClockMs
       })
 
-      console.log('[WorkflowCriticalPathAudit]', {
+      0 as any && console.log('[WorkflowCriticalPathAudit]', {
         workflowRunId,
         mcpi,
         ...workflowCriticalPath.get()

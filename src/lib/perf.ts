@@ -4,6 +4,9 @@ export const ENABLE_EXPENSIVE_PERFORMANCE_DIAGNOSTICS =
   import.meta.env.DEV &&
   import.meta.env.VITE_ENABLE_EXPENSIVE_PERFORMANCE_DIAGNOSTICS === 'true'
 
+// Deep generation profiling killswitch. When false, per-candidate/per-operation timing is disabled.
+export const ENABLE_DEEP_GENERATION_PROFILING = false
+
 // Dev-only verbose GIS diagnostics flag. Set VITE_VERBOSE_GIS_DIAGNOSTICS=true
 // in the Vite dev environment to enable detailed per-candidate/per-feature logs.
 export const VERBOSE_GIS_DIAGNOSTICS =
@@ -643,6 +646,114 @@ class DiagnosticOverheadTracker {
 
 export const diagnosticOverhead = new DiagnosticOverheadTracker()
 
+// Generic non-Turf operation counter for generation candidate/loop counts.
+class GenerationOperationCounter {
+  private counts: Record<string, number> = {}
+
+  reset(): void {
+    this.counts = {}
+  }
+
+  increment(key: string, n = 1): void {
+    if (!ENABLE_DEEP_GENERATION_PROFILING) return
+    this.counts[key] = (this.counts[key] || 0) + n
+  }
+
+  get(): Record<string, number> {
+    return { ...this.counts }
+  }
+}
+
+export const generationOperationCounters = new GenerationOperationCounter()
+
+// Direct, transaction-local hot-operation timer for the expensive per-candidate work
+// that the generic Turf proxy misses.  Namespacing: "{stage}/{op}".
+class HotOperationTracker {
+  private ops: Record<string, { count: number; totalMs: number; maxMs: number }> = {}
+
+  reset(): void {
+    this.ops = {}
+  }
+
+  record(stage: string, op: string, ms: number): void {
+    if (!ENABLE_DEEP_GENERATION_PROFILING) return
+    const key = `${stage}/${op}`
+    const existing = this.ops[key] ?? { count: 0, totalMs: 0, maxMs: 0 }
+    existing.count++
+    existing.totalMs += ms
+    existing.maxMs = Math.max(existing.maxMs, ms)
+    this.ops[key] = existing
+  }
+
+  time<T>(stage: string, op: string, fn: () => T): T {
+    if (!ENABLE_DEEP_GENERATION_PROFILING) return fn()
+    const t = performance.now()
+    try {
+      return fn()
+    } finally {
+      this.record(stage, op, performance.now() - t)
+    }
+  }
+
+  async timeAsync<T>(stage: string, op: string, fn: () => Promise<T>): Promise<T> {
+    if (!ENABLE_DEEP_GENERATION_PROFILING) return await fn()
+    const t = performance.now()
+    try {
+      return await fn()
+    } finally {
+      this.record(stage, op, performance.now() - t)
+    }
+  }
+
+  get(): Record<string, { count: number; totalMs: number; maxMs: number }> {
+    return JSON.parse(JSON.stringify(this.ops))
+  }
+}
+
+export const generationHotOps = new HotOperationTracker()
+
+// Mutually exclusive phase timer.  Start/finish should not be nested inside
+// the same phase.  Use for top-level stage reconciliation.
+class ExclusivePhaseTracker {
+  private ops: Record<string, { count: number; totalMs: number; maxMs: number }> = {}
+  private starts: Record<string, number> = {}
+
+  reset(): void {
+    this.ops = {}
+    this.starts = {}
+  }
+
+  start(name: string): void {
+    this.starts[name] = performance.now()
+  }
+
+  finish(name: string): void {
+    const start = this.starts[name]
+    if (start === undefined) return
+    const ms = performance.now() - start
+    const existing = this.ops[name] ?? { count: 0, totalMs: 0, maxMs: 0 }
+    existing.count++
+    existing.totalMs += ms
+    existing.maxMs = Math.max(existing.maxMs, ms)
+    this.ops[name] = existing
+    delete this.starts[name]
+  }
+
+  record(name: string, ms: number): void {
+    const existing = this.ops[name] ?? { count: 0, totalMs: 0, maxMs: 0 }
+    existing.count++
+    existing.totalMs += ms
+    existing.maxMs = Math.max(existing.maxMs, ms)
+    this.ops[name] = existing
+  }
+
+  get(): Record<string, { count: number; totalMs: number; maxMs: number }> {
+    return JSON.parse(JSON.stringify(this.ops))
+  }
+}
+
+export const exclusivePhases = new ExclusivePhaseTracker()
+
 // Counted Turf proxy with stage/caller context for per-stage billing
 class TurfOperationCounter {
   private counts: Record<string, number> = {}
@@ -716,13 +827,16 @@ export const turfCounter = new TurfOperationCounter()
 
 import * as rawTurf from '@turf/turf'
 
-// Point-in-polygon cache with bbox short-circuit for primary-road optimization
+// Point-in-polygon cache with bbox short-circuit for primary-road optimization.
+// Reverted to the Batch-2 string-keyed caches: the nested numeric-map experiment
+// caused a large runtime regression, so the exact original keying is restored.
 export class PipCache {
   private pointCache = new Map<string, GeoJSON.Feature<GeoJSON.Point>>()
   private pipCache = new WeakMap<object, Map<string, boolean>>()
   private bboxes = new WeakMap<object, { minX: number; minY: number; maxX: number; maxY: number }>()
   private nearestCache = new Map<string, GeoJSON.Feature<GeoJSON.Point>>()
   private distanceCache = new Map<string, number>()
+  private pointToLineDistanceCache = new Map<string, number>()
   stats = {
     pointCalls: 0,
     pointUnique: 0,
@@ -737,7 +851,13 @@ export class PipCache {
     pipMaxMs: 0,
     bboxRejected: 0,
     booleanPipExecuted: 0,
-    pointAllocationsSaved: 0
+    pointAllocationsSaved: 0,
+    nearestCalls: 0,
+    nearestCacheHits: 0,
+    distanceCalls: 0,
+    distanceCacheHits: 0,
+    pointToLineDistanceCalls: 0,
+    pointToLineDistanceCacheHits: 0
   }
 
   private getPointKey(coords: number[], props?: any): string {
@@ -753,50 +873,73 @@ export class PipCache {
   }
 
   getPoint(coords: number[], props?: any): GeoJSON.Feature<GeoJSON.Point> {
-    if (VERBOSE_GIS_DIAGNOSTICS) this.stats.pointCalls++
+    this.stats.pointCalls++
     const key = this.getPointKey(coords, props)
     const cached = this.pointCache.get(key)
     if (cached) {
-      if (VERBOSE_GIS_DIAGNOSTICS) {
-        this.stats.pointReuse++
-        this.stats.pointAllocationsSaved++
-      }
+      this.stats.pointReuse++
+      this.stats.pointAllocationsSaved++
       return cached
     }
     const pt = rawTurf.point(coords, props)
     this.pointCache.set(key, pt)
-    if (VERBOSE_GIS_DIAGNOSTICS) this.stats.pointUnique++
+    this.stats.pointUnique++
     return pt
   }
 
   getNearestPointOnLine(line: any, point: any): GeoJSON.Feature<GeoJSON.Point> {
+    this.stats.nearestCalls++
     const lineKey = makeRoadKey(line)
     const ptKey = makePointKey(point)
     const key = `${lineKey}|${ptKey}`
     const cached = this.nearestCache.get(key)
-    if (cached) return cached
+    if (cached) {
+      this.stats.nearestCacheHits++
+      return cached
+    }
     const result = rawTurf.nearestPointOnLine(line, point)
     this.nearestCache.set(key, result)
     return result
   }
 
   getDistance(a: any, b: any, units?: any): number {
+    this.stats.distanceCalls++
     const aKey = makePointKey(a)
     const bKey = makePointKey(b)
     const pair = aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`
     const key = `${pair}|${String(units ?? '')}`
     const cached = this.distanceCache.get(key)
-    if (cached !== undefined) return cached
+    if (cached !== undefined) {
+      this.stats.distanceCacheHits++
+      return cached
+    }
     const result = rawTurf.distance(a, b, units)
     this.distanceCache.set(key, result)
     return result
   }
 
+  getPointToLineDistance(point: any, line: any, options?: any): number {
+    this.stats.pointToLineDistanceCalls++
+    const ptKey = makePointKey(point)
+    const lineKey = makeRoadKey(line)
+    const units = (options && options.units) ? options.units : 'default'
+    const key = `${ptKey}|${lineKey}|${units}`
+    const cached = this.pointToLineDistanceCache.get(key)
+    if (cached !== undefined) {
+      this.stats.pointToLineDistanceCacheHits++
+      return cached
+    }
+    const result = rawTurf.pointToLineDistance(point, line, options)
+    this.pointToLineDistanceCache.set(key, result)
+    return result
+  }
+
   getBooleanPointInPolygon(point: any, polygon: any, options?: any): boolean {
-    if (VERBOSE_GIS_DIAGNOSTICS) this.stats.pipCalls++
+    this.stats.pipCalls++
     const polygonCache = this.pipCache.get(polygon) ?? new Map<string, boolean>()
     if (!this.pipCache.has(polygon)) {
       this.pipCache.set(polygon, polygonCache)
+      this.stats.pipUnique++
     }
 
     const coords = point?.geometry?.coordinates ?? point
@@ -805,17 +948,19 @@ export class PipCache {
     const key = `${x},${y}|${optionKey}`
 
     if (polygonCache.has(key)) {
-      if (VERBOSE_GIS_DIAGNOSTICS) this.stats.pipHits++
+      this.stats.pipHits++
       return polygonCache.get(key)!
     }
 
+    this.stats.pipMisses++
     const bbox = this.getBbox(polygon)
     if (x < bbox.minX || x > bbox.maxX || y < bbox.minY || y > bbox.maxY) {
-      if (VERBOSE_GIS_DIAGNOSTICS) this.stats.bboxRejected++
+      this.stats.bboxRejected++
       polygonCache.set(key, false)
       return false
     }
 
+    this.stats.booleanPipExecuted++
     const result = rawTurf.booleanPointInPolygon(point, polygon, options)
     polygonCache.set(key, result)
     return result
@@ -830,6 +975,10 @@ let activePipCache: PipCache | null = null
 
 export function setActivePipCache(cache: PipCache | null) {
   activePipCache = cache
+}
+
+export function getActivePipCache(): PipCache | null {
+  return activePipCache
 }
 
 class TurfPerformanceTracker {
@@ -990,6 +1139,9 @@ function createTurfWrapper(prop: string, val: any, target: any) {
           }
           if (activePipCache && prop === 'distance' && args.length >= 2) {
             return activePipCache.getDistance(args[0], args[1], args[2])
+          }
+          if (activePipCache && prop === 'pointToLineDistance' && args.length >= 2) {
+            return activePipCache.getPointToLineDistance(args[0], args[1], args[2])
           }
 
           const first = args[0]

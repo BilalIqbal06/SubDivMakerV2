@@ -1,4 +1,4 @@
-﻿import { turfc as turf, VERBOSE_GIS_DIAGNOSTICS, recomputeCounter, turfCounter, turfPerformance, PipCache, setActivePipCache } from '../lib/perf'
+﻿import { turfc as turf, VERBOSE_GIS_DIAGNOSTICS, ENABLE_DEEP_GENERATION_PROFILING, recomputeCounter, turfCounter, turfPerformance, PipCache, getActivePipCache, setActivePipCache } from '../lib/perf'
 import { computeRedevelopmentDisturbance } from '../lib/redevelopmentContext'
 import { fastAlong, fastBearing } from './fastAlong'
 import { yieldIfNeeded, yieldToMainThread } from '../lib/cooperativeScheduler'
@@ -57,6 +57,7 @@ class PrimaryRoadDeepTracker {
   activeCandidates = new Map<string, { start: number; sub: Record<string, number> }>()
   openOps: Record<string, number> = {}
   mcpi = ''
+  private enabled = ENABLE_DEEP_GENERATION_PROFILING
 
   private ensureLoop(name: string): DeepLoopRecord {
     if (!this.loops[name]) {
@@ -73,6 +74,7 @@ class PrimaryRoadDeepTracker {
   }
 
   startLoop(name: string, entering = 0) {
+    if (!this.enabled) return
     const l = this.ensureLoop(name)
     l.executionCount++
     l.candidateCountEntering += entering
@@ -80,6 +82,7 @@ class PrimaryRoadDeepTracker {
   }
 
   stopLoop(name: string, exiting = 0) {
+    if (!this.enabled) return
     const start = this.openOps[name + '__loop']
     if (!start) return
     const ms = performance.now() - start
@@ -91,10 +94,12 @@ class PrimaryRoadDeepTracker {
   }
 
   startOperation(name: string) {
+    if (!this.enabled) return
     this.openOps[name] = performance.now()
   }
 
   stopOperation(name: string) {
+    if (!this.enabled) return
     const start = this.openOps[name]
     if (!start) return
     const ms = performance.now() - start
@@ -106,6 +111,7 @@ class PrimaryRoadDeepTracker {
   }
 
   timeOperation<T>(name: string, fn: () => T): T {
+    if (!this.enabled) return fn()
     this.startOperation(name)
     try {
       return fn()
@@ -115,6 +121,7 @@ class PrimaryRoadDeepTracker {
   }
 
   candidateTimeOperation<T>(id: string, name: string, fn: () => T): T {
+    if (!this.enabled) return fn()
     this.startOperation(name)
     const t0 = performance.now()
     try {
@@ -127,6 +134,7 @@ class PrimaryRoadDeepTracker {
   }
 
   async candidateAsyncTimeOperation<T>(id: string, name: string, fn: () => Promise<T>): Promise<T> {
+    if (!this.enabled) return await fn()
     const t0 = performance.now()
     this.startOperation(name)
     try {
@@ -139,6 +147,7 @@ class PrimaryRoadDeepTracker {
   }
 
   async asyncTimeOperation<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    if (!this.enabled) return await fn()
     this.startOperation(name)
     try {
       return await fn()
@@ -148,15 +157,18 @@ class PrimaryRoadDeepTracker {
   }
 
   startCandidate(id: string) {
+    if (!this.enabled) return
     this.activeCandidates.set(id, { start: performance.now(), sub: {} })
   }
 
   recordCandidateSub(id: string, name: string, ms: number) {
+    if (!this.enabled) return
     const c = this.activeCandidates.get(id)
     if (c) c.sub[name] = (c.sub[name] || 0) + ms
   }
 
   stopCandidate(id: string, routePointCount = 0, routeSegmentCount = 0): DeepCandidateRecord | null {
+    if (!this.enabled) return null
     const c = this.activeCandidates.get(id)
     if (!c) return null
     const ms = performance.now() - c.start
@@ -180,10 +192,12 @@ class PrimaryRoadDeepTracker {
   }
 
   getTopSlowCandidates(n = 5): DeepCandidateRecord[] {
+    if (!this.enabled) return []
     return [...this.candidates].sort((a, b) => b.totalCandidateMs - a.totalCandidateMs).slice(0, n)
   }
 
   flushActiveCandidates() {
+    if (!this.enabled) return
     for (const [id, c] of this.activeCandidates.entries()) {
       const ms = performance.now() - c.start
       const parts = c.sub
@@ -205,6 +219,18 @@ class PrimaryRoadDeepTracker {
   }
 
   getSummary(totalMs: number) {
+    if (!this.enabled) {
+      return {
+        measuredSubstageMs: 0,
+        unaccountedMs: 0,
+        unaccountedPercent: 0,
+        slowestSubstage: 'disabled',
+        slowestSubstageMs: 0,
+        slowestSubstagePercent: 0,
+        operations: [],
+        loops: []
+      }
+    }
     const measuredSubstageMs = round3(Object.values(this.operations).reduce((s, o) => s + o.totalMs, 0))
     const unaccountedMs = round3(Math.max(0, totalMs - measuredSubstageMs))
     const unaccountedPercent = totalMs > 0 ? round3((unaccountedMs / totalMs) * 100) : 0
@@ -1006,7 +1032,7 @@ function findLocalPrimarySpineTargets(
     const acceptedDiagnostic = diagnosticProbes.filter((t) => t.accepted)
     const nearestAcceptedDiagnostic = acceptedDiagnostic.length > 0 ? Math.min(...acceptedDiagnostic.map((t) => t.distanceMeters)) : null
     const maximumObservedInteriorDepth = acceptedDiagnostic.length > 0 ? Math.max(...acceptedDiagnostic.map((t) => t.distanceMeters)) : null
-    console.log('[RoadLocalTargetAudit]', {
+    0 as any && console.log('[RoadLocalTargetAudit]', {
       mcpi: audit.mcpi,
       street: audit.candidateName,
       componentIndex: audit.componentIndex,
@@ -1370,7 +1396,7 @@ function computeRoadDesignScore(
 
   // Phase 7B.3A: add terrain-suitability influence (~20% of the non-terrain score).
   // Bad terrain never rejects; it only penalizes the design score.
-  const terrainScoring = computePrimaryRoadTerrainScore(roadLine, terrainSuitability)
+  const terrainScoring = computePrimaryRoadTerrainScore(roadLine, terrainSuitability, 'primary-road')
   const terrainRoadScore = terrainScoring.terrainRoadScore
   const terrainPenalty = (1 - terrainRoadScore) * Math.abs(subtotal) * TERRAIN_ROAD_INFLUENCE_PCT
   const total = subtotal + terrainPenalty
@@ -1503,13 +1529,20 @@ function distanceToNearestHighDegreeNodeMeters(
   return isFinite(minD) ? minD : Infinity
 }
 
+interface PreparedStreetLines {
+  allStreetLines: GeoJSON.Feature<GeoJSON.LineString>[]
+  lineToStreetFeature: Map<GeoJSON.Feature<GeoJSON.LineString>, any>
+  streetFeatureToLines: Map<any, GeoJSON.Feature<GeoJSON.LineString>[]>
+}
+
 function findRoadConnectionCandidates(
   freeSpaceComponents: PolygonComponent[],
   parcelFeature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
   streetFeatures: any[],
   buildingUnionGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null | undefined,
   hydrologyObstaclesGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null | undefined,
-  existingPavementGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null | undefined
+  existingPavementGeometry: GeoJSON.Feature<GeoJSON.Geometry> | null | undefined,
+  preparedStreetLines?: PreparedStreetLines
 ): { candidates: RoadConnectionCandidate[]; pipeline: RoadCandidatePipeline } {
   const pipeline: RoadCandidatePipeline = {
     sourceStreetCount: streetFeatures.length,
@@ -1531,21 +1564,25 @@ function findRoadConnectionCandidates(
 
   const inst = getActivePrimaryRoadInstrumentation()
   const candidates: RoadConnectionCandidate[] = []
-  const allStreetLines: GeoJSON.Feature<GeoJSON.LineString>[] = []
-  const lineToStreetFeature = new Map<GeoJSON.Feature<GeoJSON.LineString>, any>()
+  const allStreetLines: GeoJSON.Feature<GeoJSON.LineString>[] = preparedStreetLines?.allStreetLines ?? []
+  const lineToStreetFeature: Map<GeoJSON.Feature<GeoJSON.LineString>, any> = preparedStreetLines?.lineToStreetFeature ?? new Map()
+  const streetFeatureToLines: Map<any, GeoJSON.Feature<GeoJSON.LineString>[]> = preparedStreetLines?.streetFeatureToLines ?? new Map()
+  if (!preparedStreetLines) {
+    for (const streetFeature of streetFeatures) {
+      const lines = flattenStreetLines(streetFeature)
+      streetFeatureToLines.set(streetFeature, lines)
+      for (const line of lines) {
+        allStreetLines.push(line)
+        lineToStreetFeature.set(line, streetFeature)
+      }
+    }
+  }
   const parcelBbox = safeTurfOp(() => turf.bbox(parcelFeature), null)
   function isPointInParcel(point: any): boolean {
     if (!point || !point.geometry) return false
     const [x, y] = point.geometry.coordinates
     if (parcelBbox && (x < parcelBbox[0] || x > parcelBbox[2] || y < parcelBbox[1] || y > parcelBbox[3])) return false
     return safeTurfOp(() => turf.booleanPointInPolygon(point, parcelFeature as any), false)
-  }
-  for (const streetFeature of streetFeatures) {
-    const lines = flattenStreetLines(streetFeature)
-    for (const line of lines) {
-      allStreetLines.push(line)
-      lineToStreetFeature.set(line, streetFeature)
-    }
   }
 
   const networkNodes = buildStreetNetworkNodes(allStreetLines, STREET_NETWORK_SNAP_TOLERANCE_METERS)
@@ -1557,7 +1594,8 @@ function findRoadConnectionCandidates(
   for (const streetFeature of streetFeatures) {
     accessIterations++
     const name = getStreetName(streetFeature)
-    for (const line of flattenStreetLines(streetFeature)) {
+    const preparedLines = streetFeatureToLines.get(streetFeature) ?? flattenStreetLines(streetFeature)
+    for (const line of preparedLines) {
       const lengthMeters = safeTurfOp(() => turf.length(line, { units: 'meters' }), 0)
       if (!isFinite(lengthMeters) || lengthMeters <= 0) {
         pipeline.rejectedBeforeShortlist.malformedGeometry++
@@ -1922,7 +1960,7 @@ function findRoadConnectionCandidates(
     const trueStubCount = endpointNodes.filter((n) => n.classifiedAsTrueStub).length
     const falseStubCount = endpointNodes.filter((n) => !n.classifiedAsTrueStub).length
     const highDegreeCount = networkNodes.filter((n) => n.degree >= 3).length
-    console.log('[RoadNetworkSummary]', {
+    0 as any && console.log('[RoadNetworkSummary]', {
       sourceStreetCount: pipeline.sourceStreetCount,
       nodeCount: networkNodes.length,
       highDegreeNodeCount: highDegreeCount,
@@ -2085,7 +2123,7 @@ function findRoadConnectionCandidates(
         networkContinuity: c.networkContinuity,
         preAStarScore: Number(c.preAStarScore.toFixed(1))
       }))
-    console.log('[ExistingNetworkNodeCandidates]', {
+    0 as any && console.log('[ExistingNetworkNodeCandidates]', {
       sourceStreetCount: streetFeatures.length,
       networkNodeCount: networkNodes.length,
       shortlistReady: summary.length,
@@ -2817,7 +2855,9 @@ export async function generateConceptualRoadSkeleton(
   options: GenerateConceptualRoadSkeletonOptions
 ): Promise<ConceptualRoadSkeletonResult> {
   recomputeCounter.increment('primaryRoad')
-  const pipCache = new PipCache()
+  const preexistingPipCache = getActivePipCache()
+  const pipCache = preexistingPipCache ?? new PipCache()
+  setActivePipCache(pipCache)
   const inst = new PrimaryRoadInstrumentation()
   const deepTracker = new PrimaryRoadDeepTracker()
   deepTracker.mcpi = options.mcpi
@@ -2965,7 +3005,7 @@ export async function generateConceptualRoadSkeleton(
   }
 
   if (VERBOSE_GIS_DIAGNOSTICS) {
-    console.log('[RoadObstacleBufferAudit]', {
+    0 as any && console.log('[RoadObstacleBufferAudit]', {
       mcpi,
       rightOfWayWidthFeet,
       rightOfWayHalfMeters,
@@ -3037,7 +3077,7 @@ export async function generateConceptualRoadSkeleton(
     })
     const totalBeforeSqFt = componentAudits.reduce((sum, c) => sum + c.beforeAreaSqFt, 0)
     const totalAfterSqFt = componentAudits.reduce((sum, c) => sum + c.afterAreaSqFt, 0)
-    console.log('[RoadFreeSpaceAudit]', {
+    0 as any && console.log('[RoadFreeSpaceAudit]', {
       mcpi,
       componentAudits,
       totalBeforeSqFt,
@@ -3048,7 +3088,7 @@ export async function generateConceptualRoadSkeleton(
       areaRemovedByPavementSqFt: 0,
       expandedObstaclesAreaSqFt: expandedObstacles ? squareMetersToSquareFeet(turf.area(expandedObstacles)) : 0
     })
-    console.log('[RoadFreeSpaceComponents]', {
+    0 as any && console.log('[RoadFreeSpaceComponents]', {
       mcpi,
       componentCount: usableComponents.length,
       components: usableComponents.map((comp) => {
@@ -3072,17 +3112,26 @@ export async function generateConceptualRoadSkeleton(
   }
 
   const parcelFeature = turf.feature(options.parcelGeometry)
+
   const allStreetLines: GeoJSON.Feature<GeoJSON.LineString>[] = []
+  const lineToStreetFeature = new Map<GeoJSON.Feature<GeoJSON.LineString>, any>()
+  const streetFeatureToLines = new Map<any, GeoJSON.Feature<GeoJSON.LineString>[]>()
   for (const sf of streetFeatures) {
-    allStreetLines.push(...flattenStreetLines(sf))
+    const lines = flattenStreetLines(sf)
+    streetFeatureToLines.set(sf, lines)
+    for (const line of lines) {
+      allStreetLines.push(line)
+      lineToStreetFeature.set(line, sf)
+    }
   }
+  const preparedStreetLines: PreparedStreetLines = { allStreetLines, lineToStreetFeature, streetFeatureToLines }
 
   // Generate all road connection candidates across every usable component.
   markPhase('accessCandidateGeneration', usableComponents.length)
-  const { candidates, pipeline } = findRoadConnectionCandidates(freeSpaceComponents, parcelFeature, streetFeatures, buildingUnionGeometry, hydrologyObstaclesGeometry, existingPavementGeometry)
+  const { candidates, pipeline } = findRoadConnectionCandidates(freeSpaceComponents, parcelFeature, streetFeatures, buildingUnionGeometry, hydrologyObstaclesGeometry, existingPavementGeometry, preparedStreetLines)
 
   if (isDev) {
-    console.log('[RoadConnectionCandidates]', { generated: pipeline.generated, rejectedBeforeShortlist: pipeline.rejectedBeforeShortlist })
+    0 as any && console.log('[RoadConnectionCandidates]', { generated: pipeline.generated, rejectedBeforeShortlist: pipeline.rejectedBeforeShortlist })
   }
 
   roadPipelineCounts.generated = { ...pipeline.generated }
@@ -3122,7 +3171,7 @@ export async function generateConceptualRoadSkeleton(
     report.rejectionReason = null
   }
   if (isDev) {
-    console.log('[RoadCandidateComponents]', {
+    0 as any && console.log('[RoadCandidateComponents]', {
       mcpi,
       componentsEvaluated: usableComponents.length,
       components: Object.values(componentReport)
@@ -3200,7 +3249,7 @@ export async function generateConceptualRoadSkeleton(
   }
 
   if (shortlist.length === 0) {
-    if (isDev) console.log('[RoadCandidatePipeline]', pipeline)
+    if (isDev) 0 as any && console.log('[RoadCandidatePipeline]', pipeline)
     return (primaryRoadResult = createFailedResult('No feasible road connection candidates after pre-A* filtering'))
   }
 
@@ -3227,7 +3276,7 @@ export async function generateConceptualRoadSkeleton(
     }
 
     if (routingBudget.used >= routingBudget.max) {
-      if (isDev) console.log('[RoadRoutingBudget]', { used: routingBudget.used, max: routingBudget.max, reason: 'Total routing budget exhausted, skipping remaining shortlist' })
+      if (isDev) 0 as any && console.log('[RoadRoutingBudget]', { used: routingBudget.used, max: routingBudget.max, reason: 'Total routing budget exhausted, skipping remaining shortlist' })
       break
     }
 
@@ -3292,7 +3341,7 @@ export async function generateConceptualRoadSkeleton(
     }
     if (localTargets.length === 0) {
       recordRejection(method, 'No local targets inside free space within 50-150 m fan')
-      if (isDev) console.log('[RoadDesignCandidate]', { componentIndex: candidate.sourceComponent.index, street: candidate.name, connectionMethod: candidate.connectionMethod, connectionPoint: candidate.streetPoint.geometry.coordinates, accepted: false, rejectionReason: 'No local targets inside free space within 50-150 m fan' })
+      if (isDev) 0 as any && console.log('[RoadDesignCandidate]', { componentIndex: candidate.sourceComponent.index, street: candidate.name, connectionMethod: candidate.connectionMethod, connectionPoint: candidate.streetPoint.geometry.coordinates, accepted: false, rejectionReason: 'No local targets inside free space within 50-150 m fan' })
       continue
     }
 
@@ -3310,7 +3359,7 @@ export async function generateConceptualRoadSkeleton(
         return (primaryRoadResult = createFailedResult('Road generation aborted'))
       }
       if (routingBudget.used >= routingBudget.max) {
-        if (isDev) console.log('[RoadRoutingBudget]', { used: routingBudget.used, max: routingBudget.max, reason: 'Total routing budget exhausted, skipping remaining local targets' })
+        if (isDev) 0 as any && console.log('[RoadRoutingBudget]', { used: routingBudget.used, max: routingBudget.max, reason: 'Total routing budget exhausted, skipping remaining local targets' })
         candidateBudgetExhausted = true
         break
       }
@@ -3343,7 +3392,7 @@ export async function generateConceptualRoadSkeleton(
           candidate.trace.firstFailureReason = 'A* routing failed to reach local target'
           candidate.trace.finalStatus = 'rejected'
         }
-        if (isDev) console.log('[RoadDesignCandidate]', { componentIndex: candidate.sourceComponent.index, street: candidate.name, connectionMethod: candidate.connectionMethod, connectionPoint: candidate.streetPoint.geometry.coordinates, accepted: false, rejectionReason: 'A* routing failed to reach local target' })
+        if (isDev) 0 as any && console.log('[RoadDesignCandidate]', { componentIndex: candidate.sourceComponent.index, street: candidate.name, connectionMethod: candidate.connectionMethod, connectionPoint: candidate.streetPoint.geometry.coordinates, accepted: false, rejectionReason: 'A* routing failed to reach local target' })
         continue
       }
       const aStarRawVertexCount = (aStarLine as any).properties?.rawAStarVertexCount ?? aStarLine.geometry.coordinates.length
@@ -3376,7 +3425,7 @@ export async function generateConceptualRoadSkeleton(
       }
 
       if (!roadLine) {
-        if (isDev) console.log('[RoadDesignCandidate]', { street: candidate.name, connectionMethod: candidate.connectionMethod, connectionPoint: candidate.streetPoint.geometry.coordinates, accepted: false, rejectionReason: 'Constructed centerline has fewer than 2 distinct valid positions' })
+        if (isDev) 0 as any && console.log('[RoadDesignCandidate]', { street: candidate.name, connectionMethod: candidate.connectionMethod, connectionPoint: candidate.streetPoint.geometry.coordinates, accepted: false, rejectionReason: 'Constructed centerline has fewer than 2 distinct valid positions' })
         continue
       }
 
@@ -3506,7 +3555,7 @@ export async function generateConceptualRoadSkeleton(
         }
         recordRejection(method, rejectionReason)
         if (isDev) {
-          console.log('[RoadDesignCandidate]', {
+          0 as any && console.log('[RoadDesignCandidate]', {
             street: candidate.name,
             connectionMethod: candidate.connectionMethod,
             connectionGroup: candidate.connectionType,
@@ -3695,7 +3744,7 @@ export async function generateConceptualRoadSkeleton(
       candidateResults.push({ result, score: roadDesignScore.total, design: roadDesignScore, metrics, candidate })
 
       if (isDev) {
-        console.log('[RoadDesignCandidate]', {
+        0 as any && console.log('[RoadDesignCandidate]', {
           street: candidate.name,
           connectionMethod: candidate.connectionMethod,
           connectionGroup: candidate.connectionType,
@@ -3807,10 +3856,10 @@ export async function generateConceptualRoadSkeleton(
     })
 
     if (isDev) {
-      console.log('[ComponentDevelopmentOpportunityAudit]', { mcpi: noRoadOpportunityAudit.mcpi, componentCount: noRoadOpportunityAudit.componentCount, components: noRoadOpportunityAudit.components })
-      console.log('[ComponentHydrologyRelationshipAudit]', { mcpi, components: noRoadOpportunityAudit.hydrologyAudit })
-      console.log('[DevelopmentFeasibilityAudit]', noRoadFeasibilityAudit)
-      console.log('[ProductionDevelopmentSelection]', {
+      0 as any && console.log('[ComponentDevelopmentOpportunityAudit]', { mcpi: noRoadOpportunityAudit.mcpi, componentCount: noRoadOpportunityAudit.componentCount, components: noRoadOpportunityAudit.components })
+      0 as any && console.log('[ComponentHydrologyRelationshipAudit]', { mcpi, components: noRoadOpportunityAudit.hydrologyAudit })
+      0 as any && console.log('[DevelopmentFeasibilityAudit]', noRoadFeasibilityAudit)
+      0 as any && console.log('[ProductionDevelopmentSelection]', {
         mcpi,
         componentsConsidered: noRoadFeasibilityAudit.components.length,
         supportableComponents: [],
@@ -3825,9 +3874,9 @@ export async function generateConceptualRoadSkeleton(
         finalRoadStreet: null,
         finalRoadMethod: null
       })
-      console.log('[RoadCandidateRejectionSummary]', { mcpi, attempts, preRouting: pipeline.rejectedBeforeShortlist, byMethod: roadRejectionSummary })
-      console.log('[RoadCandidatePipeline]', { mcpi, ...roadPipelineCounts })
-      console.log('[RoadGeneratorWarnings]', { mcpi, warnings })
+      0 as any && console.log('[RoadCandidateRejectionSummary]', { mcpi, attempts, preRouting: pipeline.rejectedBeforeShortlist, byMethod: roadRejectionSummary })
+      0 as any && console.log('[RoadCandidatePipeline]', { mcpi, ...roadPipelineCounts })
+      0 as any && console.log('[RoadGeneratorWarnings]', { mcpi, warnings })
     }
 
     const result = createFailedResult(finalMessage)
@@ -3965,7 +4014,7 @@ export async function generateConceptualRoadSkeleton(
   inst.markLoop('candidateRanking', candidateResults.length, rankingStart, rankingTurfBefore, 0, candidateResults.length)
 
   if (isDev) {
-    console.log('[RoadCandidateResults]', {
+    0 as any && console.log('[RoadCandidateResults]', {
       mcpi,
       candidateCount: candidateResults.length,
       candidates: candidateResults.map((cr, i) => ({
@@ -4013,7 +4062,7 @@ export async function generateConceptualRoadSkeleton(
   }
 
   if (isDev) {
-    console.log('[PrimarySpineAdequacy]', {
+    0 as any && console.log('[PrimarySpineAdequacy]', {
       mcpi,
       candidateCount: candidateResults.length,
       candidates: candidateResults.map((cr, i) => ({
@@ -4049,7 +4098,7 @@ export async function generateConceptualRoadSkeleton(
   }
 
   if (isDev) {
-    console.log('[RoadAccessSuitabilityAudit]', {
+    0 as any && console.log('[RoadAccessSuitabilityAudit]', {
       mcpi,
       candidateCount: candidateResults.length,
       candidates: candidateResults.map((cr, i) => ({
@@ -4125,10 +4174,10 @@ export async function generateConceptualRoadSkeleton(
   }
 
   if (isDev) {
-    console.log('[ComponentDevelopmentOpportunityAudit]', { mcpi: opportunityAudit.mcpi, componentCount: opportunityAudit.componentCount, components: opportunityAudit.components })
-    console.log('[ComponentHydrologyRelationshipAudit]', { mcpi, components: opportunityAudit.hydrologyAudit })
-    console.log('[DevelopmentFeasibilityAudit]', feasibilityAudit)
-    console.log('[ProductionDevelopmentSelection]', {
+    0 as any && console.log('[ComponentDevelopmentOpportunityAudit]', { mcpi: opportunityAudit.mcpi, componentCount: opportunityAudit.componentCount, components: opportunityAudit.components })
+    0 as any && console.log('[ComponentHydrologyRelationshipAudit]', { mcpi, components: opportunityAudit.hydrologyAudit })
+    0 as any && console.log('[DevelopmentFeasibilityAudit]', feasibilityAudit)
+    0 as any && console.log('[ProductionDevelopmentSelection]', {
       mcpi,
       componentsConsidered: feasibilityAudit.components.length,
       supportableComponents: supportableComponents.map((c) => c.componentIndex),
@@ -4217,7 +4266,7 @@ export async function generateConceptualRoadSkeleton(
     const winningScoreDifference =
       (winnerWithSuitability?.finalScore ?? 0) - (baselineWinnerWithoutSuitability?.finalScore ?? 0)
 
-    console.log('[PrimaryRoadTerrainScoringAudit]', {
+    0 as any && console.log('[PrimaryRoadTerrainScoringAudit]', {
       mcpi,
       candidateCount: selectedComponentCandidates.length,
       baselineWinnerWithoutSuitability,
@@ -4261,7 +4310,7 @@ export async function generateConceptualRoadSkeleton(
         firstFailureStage: c.trace.firstFailureStage,
         firstFailureReason: c.trace.firstFailureReason
       }))
-    console.log('[RoadComponentRoutingTrace]', { mcpi, targetIndices, candidateCount: tracedCandidates.length, candidates: tracedCandidates })
+    0 as any && console.log('[RoadComponentRoutingTrace]', { mcpi, targetIndices, candidateCount: tracedCandidates.length, candidates: tracedCandidates })
   }
 
   if (isDev) {
@@ -4293,7 +4342,7 @@ export async function generateConceptualRoadSkeleton(
       }
     }
 
-    console.log('[RoadDesignWinner]', {
+    0 as any && console.log('[RoadDesignWinner]', {
       street: winner.result.connectionStreetName,
       connectionMethod: winner.result.connectionMethod,
       connectionGroup: winner.result.connectionGroup,
@@ -4347,7 +4396,7 @@ export async function generateConceptualRoadSkeleton(
     //  candidate-selection path, guarded by import.meta.env.DEV.)
 
     const roadAudit = roadCenter ? computeRoadSmoothnessMetrics(roadCenter) : null
-    console.log('[RoadDesignGeometryAudit]', {
+    0 as any && console.log('[RoadDesignGeometryAudit]', {
       mcpi,
       coordinates: roadCenter?.geometry.coordinates ?? [],
       segmentBearings: roadAudit?.segmentBearings ?? [],
@@ -4369,7 +4418,7 @@ export async function generateConceptualRoadSkeleton(
       simplificationUsed: winner.result.simplificationUsed ?? false
     })
 
-    console.log('[RoadInitialTangentAudit]', {
+    0 as any && console.log('[RoadInitialTangentAudit]', {
       mcpi,
       connectionMethod: winner.result.connectionMethod,
       desiredTangentFt: winner.result.desiredTangentFt ?? 0,
@@ -4427,7 +4476,7 @@ export async function generateConceptualRoadSkeleton(
       ? safeTurfOp(() => turf.distance(auditDevelopmentEntryPoint, nearestPointOnFreeSpace, { units: 'meters' }), Infinity)
       : NaN
 
-    console.log('[RoadDevelopmentEntryAudit]', {
+    0 as any && console.log('[RoadDevelopmentEntryAudit]', {
       mcpi,
       connectionPoint: auditConnectionPoint?.geometry.coordinates,
       developmentEntryPoint: auditDevelopmentEntryPoint?.geometry.coordinates,
@@ -4562,7 +4611,7 @@ export async function generateConceptualRoadSkeleton(
         obviousOpportunityToContinue: ((remainingCorridorDepthM * 3.28084) > 100 && (availablePenetrationFt - achievedPenetrationFt) > 100) ? 'WARN' : 'PASS'
       }
 
-      console.log('[RoadPrimarySpineQualityAudit]', {
+      0 as any && console.log('[RoadPrimarySpineQualityAudit]', {
         mcpi,
         exactCenterlineCoordinates: centerlineCoords,
         segmentLengthsFt: roadAudit?.segmentLengthsFt ?? [],
@@ -4636,7 +4685,7 @@ export async function generateConceptualRoadSkeleton(
       serviceDominatedByTargetDistanceFt: cr.result.serviceDominatedByTargetDistanceFt ?? null,
       serviceDominanceReasons: cr.result.serviceDominanceReasons ?? []
     }))
-    console.log('[RoadTargetAlternatives]', {
+    0 as any && console.log('[RoadTargetAlternatives]', {
       mcpi,
       componentIndex: winner.result.candidateComponentUsed.index,
       street: winner.result.connectionStreetName,
@@ -4659,7 +4708,7 @@ export async function generateConceptualRoadSkeleton(
         ? 'primary-spine service dominance'
         : 'best road-design score among non-service-dominated alternatives'
 
-    console.log('[RoadPrimarySpineSelection]', {
+    0 as any && console.log('[RoadPrimarySpineSelection]', {
       mcpi,
       candidateFamily: winnerGroupKey,
       alternativesEvaluated: sameFamily.length,
@@ -4679,7 +4728,7 @@ export async function generateConceptualRoadSkeleton(
     const accessibleComponentIndices = new Set(candidates.map((c) => c.sourceComponent.index))
     const accessibleComponents = usableComponents.filter((c) => accessibleComponentIndices.has(c.index))
     const inaccessibleComponents = usableComponents.filter((c) => !accessibleComponentIndices.has(c.index))
-    console.log('[RoadComponentSelection]', {
+    0 as any && console.log('[RoadComponentSelection]', {
       mcpi,
       componentsEvaluated: usableComponents.length,
       accessibleComponents: accessibleComponents.length,
@@ -4738,12 +4787,12 @@ export async function generateConceptualRoadSkeleton(
           reasonRelativeToWinner
         }
       })
-      console.log('[RoadComponentComparisonAudit]', { mcpi, components: componentComparison, winnerComponentIndex: winner.result.candidateComponentUsed.index, winnerScore: winner.score })
+      0 as any && console.log('[RoadComponentComparisonAudit]', { mcpi, components: componentComparison, winnerComponentIndex: winner.result.candidateComponentUsed.index, winnerScore: winner.score })
     }
 
-    console.log('[RoadCandidateRejectionSummary]', { mcpi, attempts, preRouting: pipeline.rejectedBeforeShortlist, byMethod: roadRejectionSummary })
-    console.log('[RoadCandidatePipeline]', { mcpi, ...roadPipelineCounts })
-    console.log('[RoadGeneratorWarnings]', { mcpi, warnings })
+    0 as any && console.log('[RoadCandidateRejectionSummary]', { mcpi, attempts, preRouting: pipeline.rejectedBeforeShortlist, byMethod: roadRejectionSummary })
+    0 as any && console.log('[RoadCandidatePipeline]', { mcpi, ...roadPipelineCounts })
+    0 as any && console.log('[RoadGeneratorWarnings]', { mcpi, warnings })
   }
 
   if (isDev && winner) {
@@ -4846,7 +4895,7 @@ export async function generateConceptualRoadSkeleton(
       return n
     })()
 
-    console.log('[RoadWaterGeometryAudit]', {
+    0 as any && console.log('[RoadWaterGeometryAudit]', {
       mcpi,
       proposedRoadCenterlineGeometryType: roadCenter?.geometry?.type ?? null,
       proposedRightOfWayGeometryType: proposedRightOfWay?.geometry?.type ?? null,
@@ -4884,7 +4933,7 @@ export async function generateConceptualRoadSkeleton(
       terrainData || null
     )
     if (isDev) {
-      console.log('[RoadTerrainProfile]', {
+      0 as any && console.log('[RoadTerrainProfile]', {
         mcpi,
         roadType: 'primary',
         roadLengthFt: winner.result.terrainProfile.roadLengthFt,
@@ -4926,7 +4975,7 @@ export async function generateConceptualRoadSkeleton(
         applyTerrainAwareSelection(winner.result, selection)
       )
       if (isDev) {
-        console.log('[TerrainRoadAlternatives]', selection.alternatives.map(a => ({
+        0 as any && console.log('[TerrainRoadAlternatives]', selection.alternatives.map(a => ({
           id: a.id,
           family: a.family,
           hardValid: a.hardValid,
@@ -4944,7 +4993,7 @@ export async function generateConceptualRoadSkeleton(
           rejectionReason: a.rejectionReason,
           selected: a.selected
         })))
-        console.log('[TerrainRoadSelection]', {
+        0 as any && console.log('[TerrainRoadSelection]', {
           mcpi,
           selectedFamily: selection.selected.family,
           baselineMaxGrade: selection.baseline.metrics.maximumSegmentGradePercent,
@@ -5152,7 +5201,7 @@ export async function generateConceptualRoadSkeleton(
       const terrainAwareCandidateCount = (primaryRoadResult as any).terrainAlternatives?.length ?? 0
       const waypointCandidateCount = (primaryRoadResult as any).terrainAlternatives?.reduce((s: number, a: any) => s + (a.waypoints?.length ?? 0), 0) ?? 0
 
-      console.log('[PrimaryRoadDeepPerformanceAudit]', {
+      0 as any && console.log('[PrimaryRoadDeepPerformanceAudit]', {
         mcpi: options.mcpi,
         totalMs: primaryRoadWallClockMs,
         measuredSubstageMs: deepTracker.getSummary(primaryRoadWallClockMs).measuredSubstageMs,
@@ -5174,7 +5223,7 @@ export async function generateConceptualRoadSkeleton(
       })
 
       const result = primaryRoadResult
-      console.log('[PrimaryRoadOptimizationEquivalenceAudit]', {
+      0 as any && console.log('[PrimaryRoadOptimizationEquivalenceAudit]', {
         mcpi: options.mcpi,
         baselineWinner: result.connectionMethod ?? result.templateName ?? null,
         optimizedWinner: result.connectionMethod ?? result.templateName ?? null,
@@ -5201,7 +5250,7 @@ export async function generateConceptualRoadSkeleton(
       })
     }
 
-    setActivePipCache(null)
+    if (!preexistingPipCache) setActivePipCache(null)
     setActiveDeepTracker(null)
     if (VERBOSE_GIS_DIAGNOSTICS) {
       turfCounter.endStage()

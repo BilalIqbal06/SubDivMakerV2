@@ -1258,7 +1258,7 @@ export async function generateLocalDevelopmentStreetExpansion(
 
         // Phase 7B.3C: score the centerline once using the cached terrain query before the fast layout.
         if (terrainSuitability && !street.terrainSuitabilityScoring) {
-          const scoring = computeRoadTerrainScore(route.centerline, terrainSuitability)
+          const scoring = computeRoadTerrainScore(route.centerline, terrainSuitability, 'local-street')
           street.terrainSuitabilityScoring = scoring
           street.terrainRoadScore = scoring.terrainRoadScore
           street.terrainInfluence = scoring.available ? 'USED' : 'INSUFFICIENT_DATA'

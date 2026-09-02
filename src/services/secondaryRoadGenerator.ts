@@ -626,7 +626,7 @@ export function validateAndScoreCandidate(
   // This runs before hard checks so rejected candidates still carry diagnostic terrain data.
   if (terrainSuitability !== undefined && !branch.terrainSuitabilityScoring) {
     if (branch.centerline?.geometry?.coordinates && branch.centerline.geometry.coordinates.length >= 2) {
-      branch.terrainSuitabilityScoring = computeRoadTerrainScore(branch.centerline, terrainSuitability)
+      branch.terrainSuitabilityScoring = computeRoadTerrainScore(branch.centerline, terrainSuitability, 'secondary-road')
       branch.terrainRoadScore = branch.terrainSuitabilityScoring.terrainRoadScore
     }
   }

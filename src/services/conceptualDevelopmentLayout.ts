@@ -768,7 +768,7 @@ function makeEnvelopeForLot(lot: any, lotId: string, terrainSuitability?: Terrai
   if (!scaled) return null
   const envClip = safeTurfOp(() => turfIntersect(scaled, lot) as GeoJSON.Feature<GeoJSON.Polygon> | null, null)
   if (!envClip || areaSqFt(envClip) <= 300) return null
-  const envelopePlacement = computeTerrainPlacementEvaluation(envClip, terrainSuitability)
+  const envelopePlacement = computeTerrainPlacementEvaluation(envClip, terrainSuitability, 'layout-envelope')
   if (envelopePlacement.avoidRejection) return null
   return {
     id: `ENV-${lotId}`,
@@ -1192,7 +1192,7 @@ export async function generateSingleFamilyLots(
 
       if (!rejectReason) {
         const t0 = performance.now()
-        lotPlacement = computeTerrainPlacementEvaluation(lotPoly, terrainSuitability)
+        lotPlacement = computeTerrainPlacementEvaluation(lotPoly, terrainSuitability, 'layout-lot')
         terrainQueryCount++
         terrainQueryMs += performance.now() - t0
         if (lotPlacement.avoidRejection) {
@@ -1283,31 +1283,38 @@ export async function generateSingleFamilyLots(
       else rdm.sideBLots++
 
       const id = `LOT-${zone.id}-${lotIndex}`
-      lotIndex++
+      if (!rankOnly) lotIndex++
 
-      const lotCell: ConceptualLot = {
-        id,
-        useType: 'single-family',
-        zoneId: zone.id,
-        geometry: lotPoly as GeoJSON.Feature<GeoJSON.Polygon>,
-        areaSqFt: round3(area),
-        areaAcres: round3(sqFtToAcres(area)),
-        targetLotAreaSqFt: targetArea,
-        lotWidthFt: round3(frontage),
-        lotDepthFt: round3(depth),
-        roadBearing: round3(roadBearing),
-        roadRelationship: zone.roadRelationship,
-        terrain: zone.terrainAssessment,
-        compatibility: zone.compatibilityByUse['single-family'] ?? 'WEAK',
-        frontageFt: round3(frontage),
-        depthFt: round3(depth),
-        frontageRoadId: run.properties.roadId,
-        frontageClassification: run.properties.frontageClassification,
-        frontageToRowDistanceFt: round3(run.properties.frontageToRowDistanceFt),
-        connectorLengthFt: round3(run.properties.connectorLengthFt),
-        quality: quality.rating,
-        terrainPlacement: lotPlacement
-      }
+      const lotCell: any = rankOnly
+        ? {
+            areaSqFt: round3(area),
+            areaAcres: round3(sqFtToAcres(area)),
+            frontageFt: round3(frontage),
+            frontageRoadId: run.properties.roadId
+          }
+        : {
+            id,
+            useType: 'single-family',
+            zoneId: zone.id,
+            geometry: lotPoly as GeoJSON.Feature<GeoJSON.Polygon>,
+            areaSqFt: round3(area),
+            areaAcres: round3(sqFtToAcres(area)),
+            targetLotAreaSqFt: targetArea,
+            lotWidthFt: round3(frontage),
+            lotDepthFt: round3(depth),
+            roadBearing: round3(roadBearing),
+            roadRelationship: zone.roadRelationship,
+            terrain: zone.terrainAssessment,
+            compatibility: zone.compatibilityByUse['single-family'] ?? 'WEAK',
+            frontageFt: round3(frontage),
+            depthFt: round3(depth),
+            frontageRoadId: run.properties.roadId,
+            frontageClassification: run.properties.frontageClassification,
+            frontageToRowDistanceFt: round3(run.properties.frontageToRowDistanceFt),
+            connectorLengthFt: round3(run.properties.connectorLengthFt),
+            quality: quality.rating,
+            terrainPlacement: lotPlacement
+          }
       lots.push(lotCell)
       remaining = safeTurfOp(() => turfDifference(remaining as any, lotPoly as any) as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> | null, remaining)
       if (!remaining) break
@@ -1507,7 +1514,7 @@ function makeBuildingEnvelopeForPad(pad: ConceptualDevelopmentPad, padId: string
   if (!rawClip) return null
   const envClip = largestPolygonComponent(rawClip)
   if (!envClip || areaSqFt(envClip) <= 800) return null
-  const envelopePlacement = computeTerrainPlacementEvaluation(envClip, terrainSuitability)
+  const envelopePlacement = computeTerrainPlacementEvaluation(envClip, terrainSuitability, 'layout-envelope')
   if (envelopePlacement.avoidRejection) return null
   return {
     id: `ENV-${padId}`,
@@ -1627,7 +1634,7 @@ function generateApartmentCommercialPads(input: GenerateApartmentCommercialInput
   }
 
   const q0 = performance.now()
-  const padPlacement = computeTerrainPlacementEvaluation(clip, terrainSuitability)
+  const padPlacement = computeTerrainPlacementEvaluation(clip, terrainSuitability, 'layout-pad')
   const padQueryMs = performance.now() - q0
   result.placementAudit.terrainQueryCount = 1
   result.placementAudit.terrainQueryMs = round3(padQueryMs)

@@ -78,7 +78,7 @@ function computeTerrainDirection(
   }
 
   const [n, e, s, w] = [north, east, south, west].map(pt =>
-    pt ? getTerrainSuitabilityAtPoint(pt, terrainSuitability).elevationFt : null
+    pt ? getTerrainSuitabilityAtPoint(pt, terrainSuitability, 'terrain-direction').elevationFt : null
   )
 
   if (n == null || e == null || s == null || w == null) {

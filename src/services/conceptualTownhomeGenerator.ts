@@ -4,6 +4,7 @@ import { fastAlong, fastRhumbDestination } from './fastAlong'
 import { yieldIfNeeded } from '../lib/cooperativeScheduler'
 import type { ConceptualDevelopmentZone } from './conceptualDevelopmentProgram'
 import { extractFrontageRuns, FrontageRun } from './conceptualDevelopmentLayout'
+
 import type { TerrainSuitabilityResult, TerrainPlacementEvaluation } from '../types/terrain'
 import { computeTerrainPlacementEvaluation } from './terrainSuitabilityQuery'
 
@@ -15,8 +16,69 @@ function sqFtToAcres(sqft: number): number { return sqft / SQFT_PER_ACRE }
 function round3(n: number): number { return Math.round(n * 1000) / 1000 }
 
 function areaSqFt(feature: any): number {
+  return getFeatureArea(feature)
+}
+
+// Batch 2: object-identity spatial relation cache.  We cache only exact numeric
+// results keyed by the actual geometry objects (WeakMap).  No JSON.stringify,
+// no coordinate rounding, no persistent global state.
+const featureAreaCache = new WeakMap<any, number>()
+const overlapAreaCache = new WeakMap<any, WeakMap<any, number>>()
+const outsideAreaCache = new WeakMap<any, WeakMap<any, number>>()
+
+function getFeatureArea(feature: any): number {
   if (!feature || !feature.geometry) return 0
-  return sqMetersToSqFt(safeTurfOp(() => turf.area(feature), 0))
+  const target = feature.geometry ?? feature
+  const cached = featureAreaCache.get(target)
+  if (cached !== undefined) {
+    batch2AreaCacheHits++
+    return cached
+  }
+  const a = sqMetersToSqFt(safeTurfOp(() => turf.area(feature), 0))
+  featureAreaCache.set(target, a)
+  return a
+}
+
+function getCachedOverlapArea(a: any, b: any): number | undefined {
+  const sub = overlapAreaCache.get(a)
+  if (sub) {
+    const v = sub.get(b)
+    if (v !== undefined) {
+      batch2OverlapAreaCacheHits++
+      return v
+    }
+  }
+  return undefined
+}
+
+function setCachedOverlapArea(a: any, b: any, v: number) {
+  let sub = overlapAreaCache.get(a)
+  if (!sub) {
+    sub = new WeakMap<any, number>()
+    overlapAreaCache.set(a, sub)
+  }
+  sub.set(b, v)
+}
+
+function getCachedOutsideArea(a: any, container: any): number | undefined {
+  const sub = outsideAreaCache.get(a)
+  if (sub) {
+    const v = sub.get(container)
+    if (v !== undefined) {
+      batch2OutsideAreaCacheHits++
+      return v
+    }
+  }
+  return undefined
+}
+
+function setCachedOutsideArea(a: any, container: any, v: number) {
+  let sub = outsideAreaCache.get(a)
+  if (!sub) {
+    sub = new WeakMap<any, number>()
+    outsideAreaCache.set(a, sub)
+  }
+  sub.set(container, v)
 }
 
 function turfIntersect(a: any, b: any): any {
@@ -35,28 +97,116 @@ function turfDifference(a: any, b: any): any {
   return safeTurfOp(() => (turf as any).difference((turf as any).featureCollection([a, b])) as any, null)
 }
 
-function overlapAreaSqFt(a: any, b: any): number {
+function overlapAreaSqFt(
+  a: any,
+  b: any,
+  kind: 'row' | 'unit' | 'other' = 'other',
+  category: string = 'unknown'
+): number {
   if (!a || !b) return 0
+  batch2OverlapAreaCalls++
+  const cached = getCachedOverlapArea(a, b)
+  if (cached !== undefined) return cached
+  const aBbox = getFeatureBbox(a)
+  const bBbox = getFeatureBbox(b)
+  if (aBbox && bBbox && !bboxesOverlap(aBbox, bBbox)) {
+    batch2OverlapAreaBBoxSkips++
+    setCachedOverlapArea(a, b, 0)
+    return 0
+  }
+  // Exact boolean guard.  If booleanDisjoint is true, the geometries share no
+  // interior points so the intersection area is exactly 0.
+  const disjoint = safeTurfOp(() => (turf as any).booleanDisjoint(a, b), false)
+  if (disjoint) {
+    batch2BooleanDisjointSkips++
+    setCachedOverlapArea(a, b, 0)
+    return 0
+  }
+  batch2ExactIntersectCalls++
   const intersection = turfIntersect(a, b)
-  return intersection ? areaSqFt(intersection) : 0
+  const area = intersection ? getFeatureArea(intersection) : 0
+  setCachedOverlapArea(a, b, area)
+  return area
 }
 
-function outsideAreaSqFt(a: any, parcel: any): number {
-  if (!a || !parcel) return 0
-  const diff = turfDifference(a, parcel)
-  return diff ? areaSqFt(diff) : 0
+function outsideAreaSqFt(
+  a: any,
+  container: any,
+  kind: 'row' | 'unit' | 'other' = 'other',
+  category: string = 'unknown'
+): number {
+  if (!a || !container) return 0
+  batch2OutsideAreaCalls++
+  const cached = getCachedOutsideArea(a, container)
+  if (cached !== undefined) return cached
+  const aBbox = getFeatureBbox(a)
+  const cBbox = getFeatureBbox(container)
+  if (aBbox && cBbox && !bboxesOverlap(aBbox, cBbox)) {
+    batch2OutsideAreaBBoxSkips++
+    const area = getFeatureArea(a)
+    setCachedOutsideArea(a, container, area)
+    return area
+  }
+  // Exact boolean guard.  If booleanWithin is true, a is fully inside container
+  // so the difference area is exactly 0.
+  const within = safeTurfOp(() => (turf as any).booleanWithin(a, container), false)
+  if (within) {
+    batch2BooleanWithinSkips++
+    setCachedOutsideArea(a, container, 0)
+    return 0
+  }
+  batch2ExactDifferenceCalls++
+  const diff = turfDifference(a, container)
+  const area = diff ? getFeatureArea(diff) : 0
+  setCachedOutsideArea(a, container, area)
+  return area
 }
 
 const GEOMETRY_VALIDATION_TOLERANCE_SQFT = 1
 
 const featureBboxCache = new WeakMap<GeoJSON.Feature<GeoJSON.Geometry> | GeoJSON.Geometry, number[]>()
 
+// Batch 1 transaction-local caches (reset at the top of each generateConceptualTownhomes call)
+let townhomeRowValidationCache: Map<any, { valid: boolean; reason?: string; details: any }> = new Map()
+let townhomeUnitValidationCache: Map<any, { valid: boolean; reason?: string; details: any }> = new Map()
+
+// Batch 1 lightweight counters
+let batch1RowValidationCalls = 0
+let batch1RowValidationCacheHits = 0
+let batch1UnitValidationCalls = 0
+let batch1UnitValidationCacheHits = 0
+let batch1RowPairChecks = 0
+let batch1RowPairBBoxSkips = 0
+let batch1UnitPairChecks = 0
+let batch1UnitPairBBoxSkips = 0
+let batch1OverlapAreaCalls = 0
+let batch1OverlapAreaBBoxSkips = 0
+let batch1OutsideAreaCalls = 0
+let batch1OutsideAreaBBoxSkips = 0
+let batch1BboxCacheHits = 0
+
+// Batch 2 spatial-relation and boolean-guard counters
+let batch2AreaCacheHits = 0
+let batch2OverlapAreaCacheHits = 0
+let batch2OutsideAreaCacheHits = 0
+let batch2OverlapAreaCalls = 0
+let batch2OutsideAreaCalls = 0
+let batch2OverlapAreaBBoxSkips = 0
+let batch2OutsideAreaBBoxSkips = 0
+let batch2BooleanDisjointSkips = 0
+let batch2BooleanWithinSkips = 0
+let batch2ExactIntersectCalls = 0
+let batch2ExactDifferenceCalls = 0
+
 function getFeatureBbox(feature: any): number[] | null {
   if (!feature) return null
   const target = feature.geometry ?? feature
   if (!target) return null
   const cached = featureBboxCache.get(target)
-  if (cached) return cached
+  if (cached) {
+    batch1BboxCacheHits++
+    return cached
+  }
   const b = safeTurfOp(() => turf.bbox(feature), null)
   if (b) {
     featureBboxCache.set(target, b)
@@ -282,6 +432,23 @@ export interface TownhomeGenerationResult {
     acceptanceRateAudit: TownhomeAcceptanceRateAudit
     rowGroups: TownhomeRowGroup[]
     visualSanitySummary: TownhomeVisualSanitySummary
+  }
+  townhomePerformance: {
+    rowValidationMs: number
+    unitValidationMs: number
+    finalAssemblyTownhomeMs: number
+    rowPairChecks: number
+    rowPairBBoxSkips: number
+    rowPairExactIntersectCalls: number
+    unitPairChecks: number
+    unitPairBBoxSkips: number
+    unitPairExactIntersectCalls: number
+    featureBboxCacheHits: number
+    featureAreaCacheHits: number
+    overlapAreaCacheHits: number
+    outsideAreaCacheHits: number
+    rowValidationCacheHits: number
+    unitValidationCacheHits: number
   }
 }
 
@@ -597,11 +764,17 @@ function validateTownhomeRow(
   roadRows: { roadId: string; roadType: 'primary' | 'secondary' | 'existing' | 'local'; row: any; centerline: any }[],
   hardConstraints: GeoJSON.Feature<GeoJSON.Polygon>[]
 ): { valid: boolean; reason?: string; details: { outsideSqFt: number; outsideZoneSqFt: number; outsideCandidateSqFt: number; primaryOverlapSqFt: number; secondaryOverlapSqFt: number; localOverlapSqFt: number; hardOverlapSqFt: number } } {
+  batch1RowValidationCalls++
+  const cached = townhomeRowValidationCache.get(row)
+  if (cached) {
+    batch1RowValidationCacheHits++
+    return cached
+  }
   const TOL = GEOMETRY_VALIDATION_TOLERANCE_SQFT
-  const outsideSqFt = parcelBoundary ? outsideAreaSqFt(row.geometry, parcelBoundary) : 0
-  const outsideZoneSqFt = zoneGeometry ? outsideAreaSqFt(row.geometry, zoneGeometry) : 0
-  const outsideCandidateSqFt = candidateOpenAreaGeometry ? outsideAreaSqFt(row.geometry, candidateOpenAreaGeometry) : 0
-  const rowBbox = safeTurfOp(() => (turf as any).bbox(row.geometry), null)
+  const outsideSqFt = parcelBoundary ? outsideAreaSqFt(row.geometry, parcelBoundary, 'row', 'parcel') : 0
+  const outsideZoneSqFt = zoneGeometry ? outsideAreaSqFt(row.geometry, zoneGeometry, 'row', 'zone') : 0
+  const outsideCandidateSqFt = candidateOpenAreaGeometry ? outsideAreaSqFt(row.geometry, candidateOpenAreaGeometry, 'row', 'candidate') : 0
+  const rowBbox = getFeatureBbox(row.geometry)
 
   function rowMayOverlap(_other: any, otherBbox: any): boolean {
     if (!rowBbox || !otherBbox) return true
@@ -610,16 +783,16 @@ function validateTownhomeRow(
 
   const primaryOverlapSqFt = roadRows
     .filter(r => r.roadType === 'primary' && rowMayOverlap(r, (r as any).bbox))
-    .reduce((s, r) => s + overlapAreaSqFt(row.geometry, r.row), 0)
+    .reduce((s, r) => s + overlapAreaSqFt(row.geometry, r.row, 'row', 'primary'), 0)
   const secondaryOverlapSqFt = roadRows
     .filter(r => r.roadType === 'secondary' && rowMayOverlap(r, (r as any).bbox))
-    .reduce((s, r) => s + overlapAreaSqFt(row.geometry, r.row), 0)
+    .reduce((s, r) => s + overlapAreaSqFt(row.geometry, r.row, 'row', 'secondary'), 0)
   const localOverlapSqFt = roadRows
     .filter(r => r.roadType === 'local' && rowMayOverlap(r, (r as any).bbox))
-    .reduce((s, r) => s + overlapAreaSqFt(row.geometry, r.row), 0)
+    .reduce((s, r) => s + overlapAreaSqFt(row.geometry, r.row, 'row', 'local'), 0)
   const hardOverlapSqFt = hardConstraints
     .filter(c => rowMayOverlap(c, (c as any).bbox))
-    .reduce((s, c) => s + overlapAreaSqFt(row.geometry, c), 0)
+    .reduce((s, c) => s + overlapAreaSqFt(row.geometry, c, 'row', 'hard'), 0)
 
   const details = {
     outsideSqFt: round3(outsideSqFt),
@@ -631,15 +804,18 @@ function validateTownhomeRow(
     hardOverlapSqFt: round3(hardOverlapSqFt)
   }
 
-  if (outsideSqFt > TOL) return { valid: false, reason: 'outside-parcel', details }
-  if (outsideZoneSqFt > TOL) return { valid: false, reason: 'outside-assigned-zone', details }
-  if (outsideCandidateSqFt > TOL) return { valid: false, reason: 'outside-candidate-area', details }
-  if (primaryOverlapSqFt > TOL) return { valid: false, reason: 'overlap-primary-row', details }
-  if (secondaryOverlapSqFt > TOL) return { valid: false, reason: 'overlap-secondary-row', details }
-  if (localOverlapSqFt > TOL) return { valid: false, reason: 'overlap-local-row', details }
-  if (hardOverlapSqFt > TOL) return { valid: false, reason: 'hard-constraint', details }
+  let reason: string | undefined
+  if (outsideSqFt > TOL) reason = 'outside-parcel'
+  else if (outsideZoneSqFt > TOL) reason = 'outside-assigned-zone'
+  else if (outsideCandidateSqFt > TOL) reason = 'outside-candidate-area'
+  else if (primaryOverlapSqFt > TOL) reason = 'overlap-primary-row'
+  else if (secondaryOverlapSqFt > TOL) reason = 'overlap-secondary-row'
+  else if (localOverlapSqFt > TOL) reason = 'overlap-local-row'
+  else if (hardOverlapSqFt > TOL) reason = 'hard-constraint'
 
-  return { valid: true, details }
+  const result = { valid: !reason, reason, details }
+  townhomeRowValidationCache.set(row, result)
+  return result
 }
 
 function validateTownhomeUnit(
@@ -651,12 +827,18 @@ function validateTownhomeUnit(
   roadRows: { roadId: string; roadType: 'primary' | 'secondary' | 'existing' | 'local'; row: any; centerline: any }[],
   hardConstraints: GeoJSON.Feature<GeoJSON.Polygon>[]
 ): { valid: boolean; reason?: string; details: { outsideSqFt: number; outsideZoneSqFt: number; outsideCandidateSqFt: number; outsideParentSqFt: number; primaryOverlapSqFt: number; secondaryOverlapSqFt: number; localOverlapSqFt: number; hardOverlapSqFt: number } } {
+  batch1UnitValidationCalls++
+  const cached = townhomeUnitValidationCache.get(unit)
+  if (cached) {
+    batch1UnitValidationCacheHits++
+    return cached
+  }
   const TOL = GEOMETRY_VALIDATION_TOLERANCE_SQFT
-  const outsideSqFt = parcelBoundary ? outsideAreaSqFt(unit.geometry, parcelBoundary) : 0
-  const outsideZoneSqFt = zoneGeometry ? outsideAreaSqFt(unit.geometry, zoneGeometry) : 0
-  const outsideCandidateSqFt = candidateOpenAreaGeometry ? outsideAreaSqFt(unit.geometry, candidateOpenAreaGeometry) : 0
-  const outsideParentSqFt = outsideAreaSqFt(unit.geometry, parentRow.geometry)
-  const unitBbox = safeTurfOp(() => (turf as any).bbox(unit.geometry), null)
+  const outsideSqFt = parcelBoundary ? outsideAreaSqFt(unit.geometry, parcelBoundary, 'unit', 'parcel') : 0
+  const outsideZoneSqFt = zoneGeometry ? outsideAreaSqFt(unit.geometry, zoneGeometry, 'unit', 'zone') : 0
+  const outsideCandidateSqFt = candidateOpenAreaGeometry ? outsideAreaSqFt(unit.geometry, candidateOpenAreaGeometry, 'unit', 'candidate') : 0
+  const outsideParentSqFt = outsideAreaSqFt(unit.geometry, parentRow.geometry, 'unit', 'parent')
+  const unitBbox = getFeatureBbox(unit.geometry)
 
   function unitMayOverlap(_other: any, otherBbox: any): boolean {
     if (!unitBbox || !otherBbox) return true
@@ -665,16 +847,16 @@ function validateTownhomeUnit(
 
   const primaryOverlapSqFt = roadRows
     .filter(r => r.roadType === 'primary' && unitMayOverlap(r, (r as any).bbox))
-    .reduce((s, r) => s + overlapAreaSqFt(unit.geometry, r.row), 0)
+    .reduce((s, r) => s + overlapAreaSqFt(unit.geometry, r.row, 'unit', 'primary'), 0)
   const secondaryOverlapSqFt = roadRows
     .filter(r => r.roadType === 'secondary' && unitMayOverlap(r, (r as any).bbox))
-    .reduce((s, r) => s + overlapAreaSqFt(unit.geometry, r.row), 0)
+    .reduce((s, r) => s + overlapAreaSqFt(unit.geometry, r.row, 'unit', 'secondary'), 0)
   const localOverlapSqFt = roadRows
     .filter(r => r.roadType === 'local' && unitMayOverlap(r, (r as any).bbox))
-    .reduce((s, r) => s + overlapAreaSqFt(unit.geometry, r.row), 0)
+    .reduce((s, r) => s + overlapAreaSqFt(unit.geometry, r.row, 'unit', 'local'), 0)
   const hardOverlapSqFt = hardConstraints
     .filter(c => unitMayOverlap(c, (c as any).bbox))
-    .reduce((s, c) => s + overlapAreaSqFt(unit.geometry, c), 0)
+    .reduce((s, c) => s + overlapAreaSqFt(unit.geometry, c, 'unit', 'hard'), 0)
 
   const details = {
     outsideSqFt: round3(outsideSqFt),
@@ -687,16 +869,19 @@ function validateTownhomeUnit(
     hardOverlapSqFt: round3(hardOverlapSqFt)
   }
 
-  if (outsideSqFt > TOL) return { valid: false, reason: 'outside-parcel', details }
-  if (outsideZoneSqFt > TOL) return { valid: false, reason: 'outside-assigned-zone', details }
-  if (outsideCandidateSqFt > TOL) return { valid: false, reason: 'outside-candidate-area', details }
-  if (outsideParentSqFt > TOL) return { valid: false, reason: 'outside-parent-row', details }
-  if (primaryOverlapSqFt > TOL) return { valid: false, reason: 'overlap-primary-row', details }
-  if (secondaryOverlapSqFt > TOL) return { valid: false, reason: 'overlap-secondary-row', details }
-  if (localOverlapSqFt > TOL) return { valid: false, reason: 'overlap-local-row', details }
-  if (hardOverlapSqFt > TOL) return { valid: false, reason: 'hard-constraint', details }
+  let reason: string | undefined
+  if (outsideSqFt > TOL) reason = 'outside-parcel'
+  else if (outsideZoneSqFt > TOL) reason = 'outside-assigned-zone'
+  else if (outsideCandidateSqFt > TOL) reason = 'outside-candidate-area'
+  else if (outsideParentSqFt > TOL) reason = 'outside-parent-row'
+  else if (primaryOverlapSqFt > TOL) reason = 'overlap-primary-row'
+  else if (secondaryOverlapSqFt > TOL) reason = 'overlap-secondary-row'
+  else if (localOverlapSqFt > TOL) reason = 'overlap-local-row'
+  else if (hardOverlapSqFt > TOL) reason = 'hard-constraint'
 
-  return { valid: true, details }
+  const result = { valid: !reason, reason, details }
+  townhomeUnitValidationCache.set(unit, result)
+  return result
 }
 
 export async function generateConceptualTownhomes(input: TownhomeGeneratorInput): Promise<TownhomeGenerationResult> {
@@ -714,6 +899,36 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
   for (const c of allConstraints as any) {
     c.bbox = safeTurfOp(() => (turf as any).bbox(c), null)
   }
+
+  // Batch 1: reset transaction-local caches and counters
+  townhomeRowValidationCache = new Map()
+  townhomeUnitValidationCache = new Map()
+  batch1RowValidationCalls = 0
+  batch1RowValidationCacheHits = 0
+  batch1UnitValidationCalls = 0
+  batch1UnitValidationCacheHits = 0
+  batch1RowPairChecks = 0
+  batch1RowPairBBoxSkips = 0
+  batch1UnitPairChecks = 0
+  batch1UnitPairBBoxSkips = 0
+  batch1OverlapAreaCalls = 0
+  batch1OverlapAreaBBoxSkips = 0
+  batch1OutsideAreaCalls = 0
+  batch1OutsideAreaBBoxSkips = 0
+  batch1BboxCacheHits = 0
+
+  // Batch 2: reset object-identity relation cache counters
+  batch2AreaCacheHits = 0
+  batch2OverlapAreaCacheHits = 0
+  batch2OutsideAreaCacheHits = 0
+  batch2OverlapAreaCalls = 0
+  batch2OutsideAreaCalls = 0
+  batch2OverlapAreaBBoxSkips = 0
+  batch2OutsideAreaBBoxSkips = 0
+  batch2BooleanDisjointSkips = 0
+  batch2BooleanWithinSkips = 0
+  batch2ExactIntersectCalls = 0
+  batch2ExactDifferenceCalls = 0
 
   const warnings: string[] = []
   let rows: TownhomeRow[] = []
@@ -748,6 +963,15 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
   let currentRowPlacement: TerrainPlacementEvaluation | undefined
 
   const selectedTownhomes = [...assignments.values()].some(u => u === 'townhomes')
+  const phaseMs: Record<string, number> = {}
+  let activePhase = 'townhome/prepare'
+  let activePhaseStart = performance.now()
+  function markTownhomePhase(name: string) {
+    const now = performance.now()
+    phaseMs[activePhase] = (phaseMs[activePhase] || 0) + (now - activePhaseStart)
+    activePhase = name
+    activePhaseStart = now
+  }
 
   if (!selectedTownhomes) {
     return {
@@ -836,12 +1060,30 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
           rowsOnSecondaryFrontage: 0,
           rowsOnPrimaryFrontage: 0
         }
+      },
+      townhomePerformance: {
+        rowValidationMs: 0,
+        unitValidationMs: 0,
+        finalAssemblyTownhomeMs: 0,
+        rowPairChecks: 0,
+        rowPairBBoxSkips: 0,
+        rowPairExactIntersectCalls: 0,
+        unitPairChecks: 0,
+        unitPairBBoxSkips: 0,
+        unitPairExactIntersectCalls: 0,
+        featureBboxCacheHits: 0,
+        featureAreaCacheHits: 0,
+        overlapAreaCacheHits: 0,
+        outsideAreaCacheHits: 0,
+        rowValidationCacheHits: 0,
+        unitValidationCacheHits: 0
       }
     }
   }
 
   const placedRowGeometries: GeoJSON.Feature<GeoJSON.Polygon>[] = []
 
+  markTownhomePhase('townhome/zoneAndFrontageDiscovery')
   let zoneIndex = 0
   for (const zone of zones) {
     if (capacityReached) break
@@ -863,7 +1105,9 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
       warnings.push(`Zone ${zone.id} lies outside the selected parent parcel boundary.`)
       continue
     }
+    markTownhomePhase('townhome/availableGeometry')
     const available = computeAvailableGeometry(zoneClipped, allConstraints, candidateOpenAreaGeometry)
+    markTownhomePhase('townhome/zoneAndFrontageDiscovery')
     if (!available || areaSqFt(available) < 1000) {
       warnings.push(`Zone ${zone.id} has no available geometry for townhome row generation.`)
       continue
@@ -906,6 +1150,7 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
       }
 
       rowCandidates++
+      markTownhomePhase('townhome/rowCandidateConstruction')
       if (frontLength < CONCEPTUAL_MIN_ROW_LENGTH_FT) {
         rejectedRows++
         const reason = 'INSUFFICIENT_LENGTH'
@@ -1020,14 +1265,12 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
         continue
       }
 
-      const rowClippedBbox = getFeatureBbox(rowClipped)
-      const relevantHardConstraints = (allConstraints as any[]).filter(c => bboxesOverlap(rowClippedBbox, c.bbox))
-      const relevantRoadRows = (roadRows as any[]).filter(r => bboxesOverlap(rowClippedBbox, r.bbox))
-
       const t0 = performance.now()
-      const rowPlacement = computeTerrainPlacementEvaluation(rowClipped, terrainSuitability)
+      markTownhomePhase('townhome/terrainEvaluation')
+      const rowPlacement = computeTerrainPlacementEvaluation(rowClipped, terrainSuitability, 'townhome-row')
       terrainQueryCount++
       terrainQueryMs += performance.now() - t0
+      markTownhomePhase('townhome/rowCandidateConstruction')
       currentRowPlacement = rowPlacement
 
       if (rowPlacement.avoidRejection) {
@@ -1096,7 +1339,8 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
       }
 
       const rowZone = zoneById.get(row.zoneId)
-      const rowValidation = validateTownhomeRow(row, (rowZone?.geometry ?? null) as any, candidateOpenAreaGeometry, parcelBoundary, relevantRoadRows, relevantHardConstraints)
+      markTownhomePhase('townhome/rowValidation')
+      const rowValidation = validateTownhomeRow(row, (rowZone?.geometry ?? null) as any, candidateOpenAreaGeometry, parcelBoundary, roadRows, allConstraints)
       if (!rowValidation.valid) {
         rejectedRows++
         const reason = 'HARD_CONSTRAINT'
@@ -1121,9 +1365,11 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
           discoveryIndex,
           qualityScore: computeQualityScore(frontLength, practicalDepth, 0, run.properties.roadType, zone.terrainAssessment, 0, currentRowPlacement?.placementScore)
         })
+        markTownhomePhase('townhome/zoneAndFrontageDiscovery')
         continue
       }
 
+      markTownhomePhase('townhome/unitConstruction')
       const rawUnits = splitRowIntoUnits(row, frontLine, rearLine, frontLength)
       attemptedUnitCount += rawUnits.length
       const units: TownhomeUnitEnvelope[] = []
@@ -1136,9 +1382,11 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
         const clippedArea = areaSqFt(clipped)
         if (clippedArea < u.areaSqFt * 0.5) continue
         const t1 = performance.now()
-        const unitPlacement = computeTerrainPlacementEvaluation(clipped, terrainSuitability)
+        markTownhomePhase('townhome/terrainEvaluation')
+        const unitPlacement = computeTerrainPlacementEvaluation(clipped, terrainSuitability, 'townhome-unit')
         terrainQueryCount++
         terrainQueryMs += performance.now() - t1
+        markTownhomePhase('townhome/unitConstruction')
         if (unitPlacement.avoidRejection) {
           avoidOverlapRejectedCount++
           continue
@@ -1150,7 +1398,9 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
           areaAcres: round3(sqFtToAcres(clippedArea)),
           terrainPlacement: unitPlacement
         }
-        const unitValidation = validateTownhomeUnit(withGeometry, row, (rowZone?.geometry ?? null) as any, candidateOpenAreaGeometry, parcelBoundary, relevantRoadRows, relevantHardConstraints)
+        markTownhomePhase('townhome/unitValidation')
+        const unitValidation = validateTownhomeUnit(withGeometry, row, (rowZone?.geometry ?? null) as any, candidateOpenAreaGeometry, parcelBoundary, roadRows, allConstraints)
+        markTownhomePhase('townhome/unitConstruction')
         if (!unitValidation.valid) continue
         if (unitPlacement.warning) warnings.push(unitPlacement.warning)
         units.push(withGeometry)
@@ -1188,6 +1438,7 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
           discoveryIndex,
           qualityScore: computeQualityScore(frontLength, practicalDepth, 0, run.properties.roadType, zone.terrainAssessment, 0, currentRowPlacement?.placementScore)
         })
+        markTownhomePhase('townhome/zoneAndFrontageDiscovery')
         continue
       }
 
@@ -1222,6 +1473,7 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
         discoveryIndex,
         qualityScore: computeQualityScore(frontLength, practicalDepth, cappedUnits.length, run.properties.roadType, zone.terrainAssessment, 0, currentRowPlacement?.placementScore, rowClipped)
       })
+      markTownhomePhase('townhome/zoneAndFrontageDiscovery')
 
       if (capacityLimit != null && totalUnitCount >= capacityLimit) {
         capacityReached = true
@@ -1229,6 +1481,8 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
       }
     }
   }
+
+  markTownhomePhase('townhome/finalAssembly')
 
   // Final authoritative geometry gate — only valid rows/units are returned
   const TOL = GEOMETRY_VALIDATION_TOLERANCE_SQFT
@@ -1258,9 +1512,17 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
       const u = row.unitEnvelopes[unitIndex]
       const unitValidation = validateTownhomeUnit(u, row, (rowZone?.geometry ?? null) as any, candidateOpenAreaGeometry, parcelBoundary, roadRows, allConstraints)
       if (!unitValidation.valid) continue
+      const uBbox = getFeatureBbox(u.geometry)
       let overlaps = false
-      for (const other of allUnits) {
-        if (overlapAreaSqFt(u.geometry, other.geometry) > TOL) { overlaps = true; break }
+      for (let i = 0; i < allUnits.length; i++) {
+        const other = allUnits[i]
+        batch1UnitPairChecks++
+        const otherBbox = getFeatureBbox(other.geometry)
+        if (uBbox && otherBbox && !bboxesOverlap(uBbox, otherBbox)) {
+          batch1UnitPairBBoxSkips++
+          continue
+        }
+        if (overlapAreaSqFt(u.geometry, other.geometry, 'unit', 'unit-pair') > TOL) { overlaps = true; break }
       }
       if (overlaps) continue
       validUnits.push(u)
@@ -1277,9 +1539,16 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
       continue
     }
 
+    const rowBbox = getFeatureBbox(row.geometry)
     let rowOverlaps = false
     for (const other of finalRows) {
-      if (overlapAreaSqFt(row.geometry, other.geometry) > TOL) { rowOverlaps = true; break }
+      batch1RowPairChecks++
+      const otherBbox = getFeatureBbox(other.geometry)
+      if (rowBbox && otherBbox && !bboxesOverlap(rowBbox, otherBbox)) {
+        batch1RowPairBBoxSkips++
+        continue
+      }
+      if (overlapAreaSqFt(row.geometry, other.geometry, 'row', 'row-pair') > TOL) { rowOverlaps = true; break }
     }
     if (rowOverlaps) {
       const audit = rowAudits.find(a => a.rowId === row.id)
@@ -1324,25 +1593,31 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
         : 'PARTIAL_TARGET'
 
   const rowById = new Map(rows.map(r => [r.id, r]))
+  const unitBboxes = unitEnvelopes.map(u => getFeatureBbox(u.geometry))
   let unitOverlapCount = 0
   for (let i = 0; i < unitEnvelopes.length; i++) {
     for (let j = i + 1; j < unitEnvelopes.length; j++) {
-      if (overlapAreaSqFt(unitEnvelopes[i].geometry, unitEnvelopes[j].geometry) > GEOMETRY_VALIDATION_TOLERANCE_SQFT) {
+      batch1UnitPairChecks++
+      if (unitBboxes[i] && unitBboxes[j] && !bboxesOverlap(unitBboxes[i], unitBboxes[j])) {
+        batch1UnitPairBBoxSkips++
+        continue
+      }
+      if (overlapAreaSqFt(unitEnvelopes[i].geometry, unitEnvelopes[j].geometry, 'unit', 'unit-pair') > GEOMETRY_VALIDATION_TOLERANCE_SQFT) {
         unitOverlapCount++
       }
     }
   }
 
   const allUnitsInsideParcel = unitEnvelopes.every(u =>
-    !parcelBoundary || outsideAreaSqFt(u.geometry, parcelBoundary) <= GEOMETRY_VALIDATION_TOLERANCE_SQFT
+    !parcelBoundary || outsideAreaSqFt(u.geometry, parcelBoundary, 'unit', 'parcel') <= GEOMETRY_VALIDATION_TOLERANCE_SQFT
   )
   const allUnitsInsideCandidateArea = unitEnvelopes.every(u =>
-    !candidateOpenAreaGeometry || outsideAreaSqFt(u.geometry, candidateOpenAreaGeometry) <= GEOMETRY_VALIDATION_TOLERANCE_SQFT
+    !candidateOpenAreaGeometry || outsideAreaSqFt(u.geometry, candidateOpenAreaGeometry, 'unit', 'candidate') <= GEOMETRY_VALIDATION_TOLERANCE_SQFT
   )
   const allUnitsInsideAssignedZones = unitEnvelopes.every(u => {
     const parentRow = rowById.get(u.rowId)
     const parentZone = parentRow ? zoneById.get(parentRow.zoneId) : null
-    return !parentZone || outsideAreaSqFt(u.geometry, parentZone.geometry) <= GEOMETRY_VALIDATION_TOLERANCE_SQFT
+    return !parentZone || outsideAreaSqFt(u.geometry, parentZone.geometry, 'unit', 'zone') <= GEOMETRY_VALIDATION_TOLERANCE_SQFT
   })
 
   const meanTerrainPlacementScore = rowPlacementScores.length ? round3(rowPlacementScores.reduce((s, v) => s + v, 0) / rowPlacementScores.length) : null
@@ -1376,9 +1651,7 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
     maxAcceptedAvoidPercent: round3(maxAcceptedAvoidPercent)
   }
 
-  if (import.meta.env.DEV) {
-    console.log('[TownhomePlacementAudit]', placementAudit)
-  }
+  markTownhomePhase('done')
 
   const subAudits = buildTownhomeAudits({
     mcpi,
@@ -1432,6 +1705,23 @@ export async function generateConceptualTownhomes(input: TownhomeGeneratorInput)
       rejectionReasons,
       rowAudits,
       ...subAudits
+    },
+    townhomePerformance: {
+      rowValidationMs: round3(phaseMs['townhome/rowValidation'] ?? 0),
+      unitValidationMs: round3(phaseMs['townhome/unitValidation'] ?? 0),
+      finalAssemblyTownhomeMs: round3(phaseMs['townhome/finalAssembly'] ?? 0),
+      rowPairChecks: batch1RowPairChecks,
+      rowPairBBoxSkips: batch1RowPairBBoxSkips,
+      rowPairExactIntersectCalls: batch2ExactIntersectCalls,
+      unitPairChecks: batch1UnitPairChecks,
+      unitPairBBoxSkips: batch1UnitPairBBoxSkips,
+      unitPairExactIntersectCalls: batch2ExactIntersectCalls,
+      featureBboxCacheHits: batch1BboxCacheHits,
+      featureAreaCacheHits: batch2AreaCacheHits,
+      overlapAreaCacheHits: batch2OverlapAreaCacheHits,
+      outsideAreaCacheHits: batch2OutsideAreaCacheHits,
+      rowValidationCacheHits: batch1RowValidationCacheHits,
+      unitValidationCacheHits: batch1UnitValidationCacheHits
     }
   }
 } finally {

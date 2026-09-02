@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { turfCounter, turfPerformance, setOnNearestPointOnLine, setOnFeatureCollection } from './perf'
+import { turfCounter, turfPerformance, setOnNearestPointOnLine, setOnFeatureCollection, VERBOSE_GIS_DIAGNOSTICS } from './perf'
 
 type LoopRecord = {
   executionCount: number
@@ -206,11 +206,16 @@ export class PrimaryRoadInstrumentation {
 
   constructor() {
     activeInstrument = this
-    setOnNearestPointOnLine(this.recordNearestPoint.bind(this))
-    setOnFeatureCollection(this.recordFeatureCollection.bind(this))
-    if (import.meta.env.DEV) {
-      patchJsOnce()
-      patchAsyncOnce()
+    // Only install expensive JS/async instrumentation when verbose GIS
+    // diagnostics are actually enabled. Otherwise the global patches add
+    // overhead even though this.active will remain false.
+    if (VERBOSE_GIS_DIAGNOSTICS) {
+      setOnNearestPointOnLine(this.recordNearestPoint.bind(this))
+      setOnFeatureCollection(this.recordFeatureCollection.bind(this))
+      if (import.meta.env.DEV) {
+        patchJsOnce()
+        patchAsyncOnce()
+      }
     }
   }
 

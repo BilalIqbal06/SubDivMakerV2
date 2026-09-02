@@ -1,177 +1,56 @@
 # SubDivMaker V2
 
-A GIS-powered conceptual land-development platform that enables users to search for existing parcels, retrieve real government-published parcel boundary and zoning data, enter subdivision and site-design parameters, and generate conceptual layouts.
+A GIS-native early land-development feasibility and conceptual-design copilot.
 
-## Features
+## Purpose
 
-- **Parcel Search**: Search for parcels by address, parcel ID, or owner name
-- **GIS Integration**: Real-time data from government GIS sources
-- **Zoning Analysis**: View zoning regulations and constraints
-- **Coordinate System Support**: Handle multiple coordinate reference systems
-- **Subdivision Planning**: Configure subdivision parameters and constraints
-- **Data Export**: Export parcel data in GeoJSON and CSV formats
+SubDivMaker V2 helps planners and developers screen parcels, configure basic site and development parameters, and quickly generate conceptual road networks, development zones, and building layouts. Output is **conceptual feasibility only** — not permit-ready, not construction-ready, and not a substitute for licensed civil engineering, survey, entitlement, or environmental review.
 
 ## Pilot Jurisdiction
 
-**Loudoun County, Virginia** - The initial pilot jurisdiction with full GIS integration for parcel boundaries, zoning information, and property data.
+**Loudoun County, Virginia** — the initial pilot with live parcel geometry and Loudoun GIS integration.
 
 ## Tech Stack
 
-- **Frontend**: React 18 + TypeScript + Vite
-- **Styling**: TailwindCSS
-- **Icons**: Lucide React
-- **GIS**: Custom jurisdiction connector architecture
-- **Database**: PostgreSQL (schema provided)
+- React 18 + TypeScript + Vite
+- TailwindCSS
+- Lucide React
+- Turf / GeoJSON
+- Web Worker concept generation
 
-## Project Structure
+## Local Development
 
-```
-subdivmaker-v2/
-├── src/
-│   ├── components/          # React components
-│   │   ├── ParcelSearch.tsx
-│   │   ├── ParcelMap.tsx
-│   │   ├── ZoningOverlay.tsx
-│   │   └── SubdivisionParams.tsx
-│   ├── connectors/          # GIS jurisdiction connectors
-│   │   ├── base.ts
-│   │   └── loudounCounty.ts
-│   ├── services/            # Business logic services
-│   │   └── gisImportService.ts
-│   ├── lib/                 # Utility libraries
-│   │   └── coordinates.ts
-│   ├── types/               # TypeScript type definitions
-│   │   └── gis.ts
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── index.css
-├── public/                  # Static assets
-├── DATABASE_SCHEMA.md       # Database schema documentation
-├── DEPLOYMENT.md            # Deployment guide
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-└── vercel.json
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+ 
-- npm or yarn
-
-### Installation
-
-1. Install dependencies:
 ```bash
 npm install
-```
-
-2. Start the development server:
-```bash
 npm run dev
 ```
 
-3. Open your browser to `http://localhost:3000`
+Open `http://localhost:3004/`.
 
-### Building for Production
+## Production Build
 
 ```bash
 npm run build
 ```
 
-The built files will be in the `dist` directory.
+Built files are emitted to `dist/`.
 
-## Jurisdiction Connectors
+## Main Flow
 
-SubDivMaker V2 uses a modular connector architecture to support different GIS data sources. Each jurisdiction implements a standard interface:
+1. **Explore** — pan and select a parcel on the map
+2. **Parcel Feasibility** — automatic GIS-based site screening
+3. **Parameters** — simplified development type, intensity, priorities, and advanced options
+4. **Analyze Site** — post-analysis summary of site conditions and parameters
+5. **Generate & Export** — generate a BALANCED concept, estimate MAX YIELD and CONSTRAINT CONSERVATIVE, generate any alternate, switch among cached concepts, and export
+6. **Export** — Feasibility Summary JSON and GeoJSON for the selected fully generated concept
 
-```typescript
-interface JurisdictionConnector {
-  name: string
-  jurisdiction: string
-  searchParcels(query: string): Promise<Parcel[]>
-  getParcelById(parcelId: string): Promise<Parcel | null>
-  getZoningForParcel(parcelId: string): Promise<ZoningDistrict | null>
-  getParcelGeometry(parcelId: string): Promise<ParcelGeometry | null>
-}
-```
+## Exports
 
-### Adding a New Jurisdiction
+- **Feasibility Summary JSON** — project, parcel, screening, selected concept, constraints, roads, development, comparison, assumptions, and disclaimer
+- **GeoJSON FeatureCollection** — selected parcel, candidate open area, existing conditions, generated roads (primary, secondary, local), development zones, development pads, townhomes, and single-family lots/buildings
 
-1. Create a new connector in `src/connectors/` extending `BaseJurisdictionConnector`
-2. Implement the required methods
-3. Register the connector in `GISImportService`
+Both exports are in **EPSG:4326** and include a `conceptualOnly: true` flag and the engineering-review disclaimer.
 
-## Database Setup
+## Important Disclaimer
 
-See `DATABASE_SCHEMA.md` for the complete database schema and setup instructions.
-
-## Coordinate Systems
-
-The platform supports multiple coordinate reference systems:
-
-- **WGS84 (EPSG:4326)**: Standard GPS coordinates
-- **NAD83 Virginia State Plane South (EPSG:2285)**: Common in Loudoun County
-- **UTM Zone 17N (EPSG:32617)**: Covers Virginia area
-
-Coordinate transformations are handled in `src/lib/coordinates.ts`.
-
-## Workflow
-
-1. **Search Parcel**: Search by address, parcel ID, or owner name
-2. **Select Parcel**: Review parcel boundaries and details
-3. **Zoning Overlay**: View zoning regulations and constraints
-4. **Parameters**: Configure subdivision parameters
-5. **Generate**: Create conceptual layout (coming soon)
-
-## Deployment
-
-### Vercel
-
-The project is configured for Vercel deployment. Simply connect your repository and deploy.
-
-### Environment Variables
-
-Create a `.env` file based on `.env.example`:
-
-```env
-VITE_API_URL=your_api_url
-VITE_API_KEY=your_api_key
-```
-
-## Development Notes
-
-- The current implementation focuses on the core GIS workflow (parcel search, selection, zoning overlay, coordinate handling)
-- Advanced layout generation will be implemented after the core workflow is stable
-- Map integration (Leaflet/Mapbox) is planned for future releases
-- The Loudoun County connector uses placeholder URLs - update with actual GIS endpoints
-
-## Future Enhancements
-
-- [ ] Interactive map integration (Leaflet/Mapbox)
-- [ ] Advanced layout generation algorithms
-- [ ] Additional jurisdiction connectors
-- [ ] User authentication and project saving
-- [ ] CAD export functionality
-- [ ] 3D visualization
-- [ ] Collaboration features
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## Support
-
-For issues and questions, please open an issue on the repository.
+All density, setback, yield, road geometry, and hydrology/terrain outputs are planning-level conceptual estimates. They must be reviewed and refined by a licensed civil engineer and other qualified professionals before survey, entitlement, permitting, or construction use.

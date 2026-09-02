@@ -406,16 +406,16 @@ function CollapsibleSection({
 export default function GenerateExportPanel({
   canGenerate,
   onGenerateRoadSkeleton,
-  conceptualRoadResult,
-  secondaryRoadNetworkResult,
+  conceptualRoadResult: propConceptualRoadResult,
+  secondaryRoadNetworkResult: propSecondaryRoadNetworkResult,
   isRoadGenerating,
   roadGenerationError,
   onBackToParameters,
   developmentOpportunityBlockResult,
-  conceptualProgram,
-  conceptualLayout,
+  conceptualProgram: propConceptualProgram,
+  conceptualLayout: propConceptualLayout,
   redevelopmentImpact,
-  localStreetNetworkResult,
+  localStreetNetworkResult: propLocalStreetNetworkResult,
   parentParcelAreaAcres,
   selectedParcel,
   candidateOpenArea,
@@ -434,70 +434,19 @@ export default function GenerateExportPanel({
   submittedParameters,
   onSaveDraft
 }: GenerateExportPanelProps) {
-  const hasResult = !!conceptualRoadResult && (conceptualRoadResult.status === 'generated' || conceptualRoadResult.status === 'warning')
-  const mcpi = conceptualRoadResult?.mcpi ?? ''
   const authoritativeAlternative = conceptAlternatives?.find(a => a.id === authoritativeAlternativeId) ?? null
   const activeStrategy = authoritativeAlternative?.strategy ?? 'BALANCED'
+  const selectedAlternative = authoritativeAlternative
+
+  const conceptualRoadResult = selectedAlternative?.primaryRoadResult ?? propConceptualRoadResult
+  const secondaryRoadNetworkResult = selectedAlternative?.secondaryRoadResult ?? propSecondaryRoadNetworkResult
+  const conceptualProgram = selectedAlternative?.conceptualProgram ?? propConceptualProgram
+  const conceptualLayout = selectedAlternative?.developmentLayout ?? propConceptualLayout
+  const localStreetNetworkResult = selectedAlternative?.localStreetResult ?? propLocalStreetNetworkResult
+
+  const hasResult = !!conceptualRoadResult && (conceptualRoadResult.status === 'generated' || conceptualRoadResult.status === 'warning')
+  const mcpi = conceptualRoadResult?.mcpi ?? ''
   const [openConceptDetails, setOpenConceptDetails] = useState<Record<string, boolean>>({})
-
-  useEffect(() => {
-    if (!import.meta.env.DEV || !conceptAlternatives || !conceptAlternatives.length) return
-    const selectedId = authoritativeAlternativeId ?? null
-    const visibleSelectedCount = conceptAlternatives.filter(a => a.id === selectedId).length
-    const selectedMatchesAuthoritative = selectedId === (authoritativeAlternativeId ?? null)
-    const maxScore = Math.max(...conceptAlternatives.map(a => a.comparisonScore))
-    const rec = conceptAlternatives.find(a => a.id === recommendedAlternativeId)
-    const recommendationOk = !!rec && rec.recommended && rec.comparisonScore >= maxScore - 0.0001
-
-    const metricFields: (keyof ConceptAlternativeMetricSources)[] = [
-      'conceptualUnits', 'networkServedAcres', 'remainingOpportunityAcres', 'primaryRoadLengthFt', 'secondaryRoadLengthFt', 'localStreetLengthFt', 'totalRoadLengthFt', 'constraintImpact', 'feasibilityStatus'
-    ]
-    const metricsInvariant = conceptAlternatives.every(a => {
-      const m = a.metrics
-      const s = m.metricSources
-      const noAuthoritativeAsEstimate = !a.metrics.isAuthoritative || Object.values(s).every(v => v === 'AUTHORITATIVE')
-      const sourceMatchesValue = metricFields.every(k => {
-        const src = s[k]
-        const v = (m as any)[k]
-        if (src === 'UNAVAILABLE') return v == null
-        if (src === 'AUTHORITATIVE' || src === 'ESTIMATE') return v != null
-        return true
-      })
-      return noAuthoritativeAsEstimate && sourceMatchesValue
-    })
-
-    const invariant =
-      visibleSelectedCount === 1 &&
-      selectedMatchesAuthoritative &&
-      recommendationOk &&
-      metricsInvariant
-        ? 'OK'
-        : 'VIOLATION'
-
-    const audit = {
-      recommendedAlternativeId,
-      authoritativeAlternativeId: selectedId,
-      selectedAlternativeId: selectedId,
-      alternatives: conceptAlternatives.map(a => ({
-        id: a.id,
-        status: a.status,
-        isAuthoritative: a.metrics.isAuthoritative,
-        comparisonScore: a.comparisonScore,
-        metrics: {
-          conceptualUnits: { value: a.metrics.conceptualUnits, source: a.metrics.metricSources.conceptualUnits },
-          networkServedAcres: { value: a.metrics.networkServedAcres, source: a.metrics.metricSources.networkServedAcres },
-          totalRoadLengthFt: { value: a.metrics.totalRoadLengthFt, source: a.metrics.metricSources.totalRoadLengthFt },
-          remainingOpportunityAcres: { value: a.metrics.remainingOpportunityAcres, source: a.metrics.metricSources.remainingOpportunityAcres },
-          constraintImpact: { value: a.metrics.constraintImpact, source: a.metrics.metricSources.constraintImpact },
-          feasibilityStatus: { value: a.metrics.feasibilityStatus, source: a.metrics.metricSources.feasibilityStatus }
-        }
-      })),
-      recommendationRecomputedAt: Date.now(),
-      visibleSelectedCount,
-      invariant
-    }
-    if (import.meta.env.DEV) console.log('[ConceptAlternativeTrustAudit]', audit)
-  }, [conceptAlternatives, recommendedAlternativeId, authoritativeAlternativeId])
 
 
   // --- Feasibility Overview values ---
@@ -670,7 +619,7 @@ export default function GenerateExportPanel({
       .map(u => u.useType)
       .join(', ')) ||
     '—'
-  const zoneCount = selectedLayout?.assignedZoneCount ?? null
+  const zoneCount = selectedProgram?.zones?.length ?? selectedLayout?.assignedZoneCount ?? null
   const padCount = selectedLayout?.developmentPadCount ?? null
   const townhomeRows = selectedLayout?.townhomeGenerationResult?.rowCount ?? null
   const townhomeUnits = selectedLayout?.townhomeGenerationResult?.unitCount ?? null
@@ -726,45 +675,12 @@ export default function GenerateExportPanel({
     return 'LOW'
   })()
 
-  useEffect(() => {
-    if (!import.meta.env.DEV || !hasResult) return
-    const selectedAlt = conceptAlternatives?.find(a => a.id === authoritativeAlternativeId)
-    const recommendedAlt = conceptAlternatives?.find(a => a.id === recommendedAlternativeId)
-    const invariants: Record<string, boolean | string> = {
-      selectedAlternativeExists: !!selectedAlt,
-      recommendedAlternativeExists: !!recommendedAlt,
-      selectedIsAuthoritative: selectedAlt?.metrics.isAuthoritative === true,
-      selectedMatchesAuthoritativeId: selectedAlt?.id === authoritativeAlternativeId,
-      recommendedHasHighestScore: recommendedAlt ? recommendedAlt.comparisonScore >= Math.max(...(conceptAlternatives ?? []).map(a => a.comparisonScore)) - 0.0001 : true,
-      exportGroupsComplete: ['project', 'parcel', 'screening', 'selectedConcept', 'constraints', 'roads', 'development', 'comparison', 'assumptions', 'disclaimer'].length === 10,
-      geojsonMetadataDefined: mcpi.length > 0 && activeStrategy != null,
-      noZeroFeetWhenUnavailable: primaryLength == null || !isNaN(primaryLength),
-      primaryConstraintDefined: primaryConstraint.length > 0,
-      feasibilityStatusDefined: feasibilityStatus != null
-    }
-    const invariant = Object.values(invariants).every(v => v === true) ? 'OK' : 'VIOLATION'
-    if (import.meta.env.DEV) console.log('[FeasibilityReportAudit]', {
-      mcpi,
-      activeStrategy,
-      authoritativeAlternativeId,
-      recommendedAlternativeId,
-      sections: ['conceptOptions', 'siteOverview', 'keyConstraints', 'selectedConcept', 'developmentPotential', 'feasibilityNotes', 'exportHandoff'],
-      primaryConstraint,
-      feasibilityStatus,
-      confidence,
-      invariants,
-      invariant,
-      generatedAt: new Date().toISOString()
-    })
-  }, [hasResult, conceptAlternatives, authoritativeAlternativeId, recommendedAlternativeId, primaryConstraint, feasibilityStatus, confidence, mcpi, activeStrategy])
-
   const buttonLabel = isRoadGenerating
     ? 'Generating…'
     : hasResult
     ? 'Road Concept Generated'
     : 'Generate Road Concept'
 
-  const selectedAlternative = authoritativeAlternative
   const isSelectedAuthoritative = selectedAlternative?.metrics.isAuthoritative === true
   const isGeoJsonExportEnabled = hasResult && isSelectedAuthoritative
   const fileBase = `SubDivMakerV2_${(mcpi || 'site').replace(/[^a-zA-Z0-9_-]/g, '_')}_${activeStrategy}`
@@ -780,111 +696,6 @@ export default function GenerateExportPanel({
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
-  }
-
-  function logExportConsistencyAudit(audit: {
-    feasibilityExportEnabled: boolean
-    geoJsonExportEnabled: boolean
-    visibleMetrics: Record<string, number | null>
-    exportedMetrics: Record<string, number | null>
-    mismatches: string[]
-    featureCounts: Record<string, number>
-  }) {
-    if (!import.meta.env.DEV) return
-    const invariants = {
-      mcpiMatchesParcel: mcpi.length > 0,
-      exportAlternativeIdMatchesAuthoritative: authoritativeAlternativeId === activeStrategy,
-      noNullGeometryInGeoJson: Object.values(audit.featureCounts).every(c => c >= 0),
-      metricsMatch: audit.mismatches.length === 0,
-      noEstimateGeometry: audit.geoJsonExportEnabled ? isSelectedAuthoritative : true,
-      selectedStrategyMatchesMetadata: activeStrategy === (authoritativeAlternativeId ?? 'BALANCED')
-    }
-    const invariant = Object.values(invariants).every(Boolean) ? 'OK' : 'VIOLATION'
-    if (import.meta.env.DEV) console.log('[ExportConsistencyAudit]', {
-      mcpi,
-      authoritativeAlternativeId,
-      recommendedAlternativeId,
-      selectedStrategy: activeStrategy,
-      isAuthoritative: isSelectedAuthoritative,
-      feasibilityExportEnabled: audit.feasibilityExportEnabled,
-      geoJsonExportEnabled: audit.geoJsonExportEnabled,
-      visibleMetrics: audit.visibleMetrics,
-      exportedMetrics: audit.exportedMetrics,
-      featureCounts: audit.featureCounts,
-      mismatches: audit.mismatches,
-      invariants,
-      invariant,
-      generatedAt: new Date().toISOString()
-    })
-  }
-
-  function logFeasibilityExportConsistencyAudit(payload: any) {
-    if (!import.meta.env.DEV) return
-    const tol = 0.0001
-    const exportedSelectedAlternativeId = payload?.selectedConcept?.alternativeId
-    const selectedIsAuthoritative = !!payload?.selectedConcept?.isAuthoritative
-    const authoritativeComparisonUnits = selectedAlternative?.metrics.conceptualUnits ?? null
-    const exportedDevelopmentUnits = payload?.development?.conceptualUnitCount ?? null
-    const authoritativeServedAcres = selectedAlternative?.metrics.networkServedAcres ?? null
-    const exportedServedAcres = payload?.parcel?.networkServedAreaAcres ?? null
-    const authoritativeRoadLengthFt = selectedAlternative?.metrics.totalRoadLengthFt ?? null
-    const exportedRoadLengthFt = payload?.roads?.totalRoadLengthFt ?? null
-    const parcelScreeningRating = payload?.screening?.overallRating ?? null
-    const selectedConceptFeasibility = payload?.selectedConcept?.feasibilityStatus ?? null
-
-    const mismatches: string[] = []
-    if (exportedSelectedAlternativeId !== authoritativeAlternativeId) {
-      mismatches.push('exportedSelectedAlternativeId !== authoritativeAlternativeId')
-    }
-    if (!selectedIsAuthoritative) {
-      mismatches.push('selectedIsAuthoritative is false')
-    }
-    if (authoritativeComparisonUnits !== exportedDevelopmentUnits) {
-      mismatches.push(`conceptualUnits mismatch: authoritative=${authoritativeComparisonUnits} exported=${exportedDevelopmentUnits}`)
-    }
-    if (authoritativeServedAcres != null && exportedServedAcres != null) {
-      if (Math.abs(authoritativeServedAcres - exportedServedAcres) > tol) {
-        mismatches.push(`networkServedAcres mismatch: authoritative=${authoritativeServedAcres} exported=${exportedServedAcres}`)
-      }
-    } else if (authoritativeServedAcres !== exportedServedAcres) {
-      mismatches.push(`networkServedAcres missing: authoritative=${authoritativeServedAcres} exported=${exportedServedAcres}`)
-    }
-    if (authoritativeRoadLengthFt != null && exportedRoadLengthFt != null) {
-      if (Math.abs(authoritativeRoadLengthFt - exportedRoadLengthFt) > tol) {
-        mismatches.push(`totalRoadLengthFt mismatch: authoritative=${authoritativeRoadLengthFt} exported=${exportedRoadLengthFt}`)
-      }
-    } else if (authoritativeRoadLengthFt !== exportedRoadLengthFt) {
-      mismatches.push(`totalRoadLengthFt missing: authoritative=${authoritativeRoadLengthFt} exported=${exportedRoadLengthFt}`)
-    }
-
-    const invariants = {
-      selectedIdMatchesAuthoritative: exportedSelectedAlternativeId === authoritativeAlternativeId,
-      selectedIsAuthoritative,
-      developmentUnitsMatch: mismatches.every(m => !m.startsWith('conceptualUnits')),
-      servedAcresMatch: mismatches.every(m => !m.startsWith('networkServedAcres')),
-      roadLengthMatch: mismatches.every(m => !m.startsWith('totalRoadLengthFt')),
-      parcelScreeningIsNotConceptFeasibility: parcelScreeningRating !== selectedConceptFeasibility
-    }
-    const invariant = Object.values(invariants).every(Boolean) ? 'OK' : 'VIOLATION'
-
-    if (import.meta.env.DEV) console.log('[FeasibilityExportConsistencyAudit]', {
-      mcpi,
-      authoritativeAlternativeId,
-      exportedSelectedAlternativeId,
-      selectedIsAuthoritative,
-      authoritativeComparisonUnits,
-      exportedDevelopmentUnits,
-      authoritativeServedAcres,
-      exportedServedAcres,
-      authoritativeRoadLengthFt,
-      exportedRoadLengthFt,
-      parcelScreeningRating,
-      selectedConceptFeasibility,
-      mismatches,
-      invariants,
-      invariant,
-      generatedAt: new Date().toISOString()
-    })
   }
 
   function exportFeasibilitySummary() {
@@ -1071,8 +882,6 @@ export default function GenerateExportPanel({
         'Conceptual feasibility output only. Not construction-ready. Geometry should be reviewed and refined by a licensed civil engineer before survey, entitlement, permitting, or construction use.'
     }
 
-    logFeasibilityExportConsistencyAudit(payload)
-
     downloadJSON(payload, `${fileBase}_Feasibility.json`)
   }
 
@@ -1201,14 +1010,28 @@ export default function GenerateExportPanel({
       remainingOpportunityAcres: remainingOpportunity
     }
 
-    logExportConsistencyAudit({
-      feasibilityExportEnabled: false,
-      geoJsonExportEnabled: true,
-      visibleMetrics,
-      exportedMetrics: visibleMetrics,
-      mismatches: [],
-      featureCounts
-    })
+    const exportMismatches: string[] = []
+    if (townhomeRows != null && featureCounts.townhome_row !== townhomeRows) {
+      exportMismatches.push(`townhome_row count ${featureCounts.townhome_row} !== townhomeRowCount ${townhomeRows}`)
+    }
+    if (townhomeUnits != null && featureCounts.townhome_unit !== townhomeUnits) {
+      exportMismatches.push(`townhome_unit count ${featureCounts.townhome_unit} !== townhomeUnitCount ${townhomeUnits}`)
+    }
+    if (padCount != null && featureCounts.development_pad !== padCount) {
+      exportMismatches.push(`development_pad count ${featureCounts.development_pad} !== developmentPadCount ${padCount}`)
+    }
+    if (zoneCount != null && featureCounts.development_zone !== zoneCount) {
+      exportMismatches.push(`development_zone count ${featureCounts.development_zone} !== developmentZoneCount ${zoneCount}`)
+    }
+    if (localCount != null && featureCounts.local_street_centerline !== localCount) {
+      exportMismatches.push(`local_street_centerline count ${featureCounts.local_street_centerline} !== localStreetCount ${localCount}`)
+    }
+    if (secondaryCount != null && featureCounts.secondary_road_centerline !== secondaryCount) {
+      exportMismatches.push(`secondary_road_centerline count ${featureCounts.secondary_road_centerline} !== secondaryRoadCount ${secondaryCount}`)
+    }
+    if (import.meta.env.DEV && exportMismatches.length > 0) {
+      console.warn('[ExportIntegrityAssertion] DEV mismatch:', { mcpi, activeStrategy, mismatches: exportMismatches })
+    }
 
     const collection: any = { type: 'FeatureCollection', features, coordinateReferenceSystem: 'EPSG:4326' }
     if (developmentApproach === 'REDEVELOPMENT' && redevelopmentImpact) {
